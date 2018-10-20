@@ -1,0 +1,8 @@
+name = "StructuredMatrices"
+uuid = "831e5bd0-d036-11e8-2dea-c77e7dab29a6"
+authors = ["Chris Elrod <elrodc@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+SIMDPirates = "21efa798-c60a-11e8-04d3-e1a92915a26a"
+SLEEFwrap = "6e748a96-c50b-11e8-2c8a-ed394f64ea02"
