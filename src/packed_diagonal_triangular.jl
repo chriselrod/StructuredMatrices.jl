@@ -72,7 +72,7 @@ end
         end
         k = j - i
         ind = diagonal_structure_sub2ind(Val{$FS}(), i, k)
-        @boundscheck ind > $L && throw(BoundsError())
+        @boundscheck ind > $L && ThrowBoundsError("")
         unsafe_load(pointer(A), ind)
     end
 end
