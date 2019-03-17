@@ -124,72 +124,69 @@ function load_packed_L_quote!(qa, P, symbol_name, extract_from)
     for p ∈ 1:P
         push!(qa, :($(PaddedMatrices.sym(symbol_name, p, p)) = $extract_from[$p] ))
     end
+    ind = P
     for pc ∈ 1:P
         for pr ∈ pc+1:P
-            push!(qa, :($(PaddedMatrices.sym(symbol_name, pr, pc)) = $extract_from[$(lt_sub2ind(P,pc,pr))] ))
+            ind += 1
+            push!(qa, :($(PaddedMatrices.sym(symbol_name, pr, pc)) = $extract_from[$ind] ))
+            # push!(qa, :($(PaddedMatrices.sym(symbol_name, pr, pc)) = $extract_from[$(lt_sub2ind(P,pc,pr))] ))
         end
     end
     qa
 end
 function store_packed_L_quote!(qa, P, symbol_name, T, L)
-    outtup = Union{Symbol,T}[]
+    outtup = Expr(:tuple,)
     for p ∈ 1:P
-        push!(outtup, PaddedMatrices.sym(symbol_name, p, p) )
+        push!(outtup.args, PaddedMatrices.sym(symbol_name, p, p) )
     end
     for pc ∈ 1:P
         for pr ∈ pc+1:P
-            push!(outtup, PaddedMatrices.sym(symbol_name, pr, pc))
+            push!(outtup.args, PaddedMatrices.sym(symbol_name, pr, pc))
         end
     end
     for p ∈ binomial2(P+1)+1:L
-        push!(outtup, zero(T))
+        push!(outtup.args, zero(T))
     end
     # push!(qa, :(LowerTriangularMatrix{$P,$T,$L}($(
     #     Expr(:tuple, outtup...)
     # ))))
-    :(LowerTriangularMatrix{$P,$T,$L}($(
-        Expr(:tuple, outtup...)
-    )))
+    :(LowerTriangularMatrix{$P,$T,$L}($outtup))
 end
 function store_packed_Ut_quote!(qa, P, symbol_name, T, L)
-    outtup = Union{Symbol,T}[]
+    outtup = Expr(:tuple,)
     for p ∈ 1:P
-        push!(outtup, PaddedMatrices.sym(symbol_name, p, p) )
+        push!(outtup.args, PaddedMatrices.sym(symbol_name, p, p) )
     end
     for pc ∈ 1:P
         for pr ∈ 1:pc-1
-            push!(outtup, PaddedMatrices.sym(symbol_name, pc, pr))
+            push!(outtup.args, PaddedMatrices.sym(symbol_name, pc, pr))
         end
     end
     for p ∈ binomial2(P+1)+1:L
-        push!(outtup, zero(T))
+        push!(outtup.args, zero(T))
     end
     # push!(qa, :(UpperTriangularMatrix{$P,$T,$L}($(
     #     Expr(:tuple, outtup...)
     # ))))
-    :(UpperTriangularMatrix{$P,$T,$L}($(
-        Expr(:tuple, outtup...)
-    )))
+    :(UpperTriangularMatrix{$P,$T,$L}($outtup))
 end
 function store_packed_U_quote!(qa, P, symbol_name, T, L)
-    outtup = Union{Symbol,T}[]
+    outtup = Expr(:tuple,)
     for p ∈ 1:P
-        push!(outtup, PaddedMatrices.sym(symbol_name, p, p) )
+        push!(outtup.args, PaddedMatrices.sym(symbol_name, p, p) )
     end
     for pc ∈ 1:P
         for pr ∈ 1:pc-1
-            push!(outtup, PaddedMatrices.sym(symbol_name, pr, pc))
+            push!(outtup.args, PaddedMatrices.sym(symbol_name, pr, pc))
         end
     end
     for p ∈ binomial2(P+1)+1:L
-        push!(outtup, zero(T))
+        push!(outtup.args, zero(T))
     end
     # push!(qa, :(UpperTriangularMatrix{$P,$T,$L}($(
     #     Expr(:tuple, outtup...)
     # ))))
-    :(UpperTriangularMatrix{$P,$T,$L}($(
-        Expr(:tuple, outtup...)
-    )))
+    :(UpperTriangularMatrix{$P,$T,$L}($outtup))
 end
 
 import PaddedMatrices: sym

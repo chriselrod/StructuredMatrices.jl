@@ -1,8 +1,10 @@
 struct TriangleInverseAdjoint{P,T,L}  <: AbstractArray{T,4}
     data::NTuple{L,T}
 end
-# what order should the be stored?
-num_nonzero(N) = sum(i -> binomial2(i+1) * (N+1-i), 1:N)
+
+
+#
+num_nonzero_in_∂inv(N) = sum(i -> binomial2(i+1) * (N+1-i), 1:N)
 
 
 
@@ -25,14 +27,14 @@ function create_inv_tri_adj_tuple(P, Ubase = :U, Lbase = :L)
 end
 
 # function ∂inv(Lt::LowerTriangularMatrix{P,T,L}) where {P,L,T}
-@generated function ∂inv(Lt::LowerTriangularMatrix{P,T,L}) where {P,L,T}
+@generated function ∂inv(Lt::AbstractLowerTriangularMatrix{P,T,L}) where {P,L,T}
 # @generated function ∂inv(Lt::LowerTriangularMatrix{P,T,L}) where {P,T,L}
     q = quote end
     qa = q.args
     load_packed_L_quote!(qa, P, :Lt, :Lt)
     ∂inv_L_core_quote!(qa, P, :U, :Lt, T)
     uq = store_packed_U_quote!(qa, P, :U, T, L)
-    Ladj = num_nonzero(P)
+    Ladj = num_nonzero_in_∂inv(P)
     quote
         $(Expr(:meta,:inline))
         @fastmath @inbounds begin
@@ -42,6 +44,11 @@ end
         end
     end
 end
+@inline function ∂inv(x)
+    x⁻¹ = inv(x)
+    x⁻² = x⁻¹ * x⁻¹
+    x⁻¹, -x⁻²
+end
 
 function partial_inv_quote(P,T,L = binomial2(P+1))
     q = quote end
@@ -49,7 +56,7 @@ function partial_inv_quote(P,T,L = binomial2(P+1))
     load_packed_L_quote!(qa, P, :Lt, :Lt)
     ∂inv_L_core_quote!(qa, P, :U, :Lt, T)
     uq = store_packed_U_quote!(qa, P, :U, T, L)
-    Ladj = num_nonzero(P)
+    Ladj = num_nonzero_in_∂inv(P)
     quote
         # $(Expr(:meta,:inline))
         # @fastmath @inbounds begin
@@ -64,7 +71,7 @@ end
 # extract triangle_transpose
 
 @generated function Base.:*(
-        t::PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL},
+        t::LinearAlgebra.Adjoint{T,PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL,PL}},
         adj::TriangleInverseAdjoint{P,T,L}
     ) where {P,T,L,M,PL}
 
@@ -115,7 +122,7 @@ end
         @fastmath @inbounds begin
             $loadq
             $q
-            ConstantFixedSizePaddedVector{$outsize,$T}($storeq)
+            ConstantFixedSizePaddedVector{$outsize,$T}($storeq)'
         end
     end
 
