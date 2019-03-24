@@ -10,6 +10,23 @@ end
     @boundscheck j > P && ThrowBoundsError("j == $j > $P.")
     @inbounds S.data[ut_sub2ind(P, i, j)]
 end
+@inline function Base.getindex(S::LinearAlgebra.Adjoint{Union{},<:AbstractUpperTriangularMatrix{P,Vec{W,T},L}}, i::Int, j::Int) where {P,T,L,W}
+    i < j && return zero(T)
+    ind = ut_sub2ind(P, j, i)
+    @boundscheck i > L && ThrowBoundsError("ind == $ind > $L.")
+    @inbounds S.parent.data[ind]
+end
+@inline function Base.getindex(S::AbstractLowerTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, i, j) where {P,W,T,L}
+    @boundscheck i > P && ThrowBoundsError("i == $i > $P")
+    j > i && return SIMDPirates.vbroadcast(Vec{W,T}, zero(T))
+    @inbounds S.data[lt_sub2ind(P, i, j)]
+end
+
+@inline function Base.getindex(S::AbstractUpperTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, i, j) where {P,W,T,L}
+    @boundscheck j > P && ThrowBoundsError("j == $j > $P.")
+    i > j && return SIMDPirates.vbroadcast(Vec{W,T}, zero(T))
+    @inbounds S.data[ut_sub2ind(P, i, j)]
+end
 
 @generated function LinearAlgebra.det(A::AbstractTriangularMatrix{P,T,L}) where {P,T,L}
     quote
@@ -330,94 +347,6 @@ end
             $q
             $uq
         end
-    end
-end
-
-@generated function SIMDPirates.vbroadcast(::Type{Vec{W,T}}, L::A) where {W,T,M,L,A <: AbstractTriangularMatrix{M,T,L}}
-    q = quote end
-    outtup = Expr(:tuple,)
-    Alength = (M*(M+1)) >> 1
-    V = Vec{W,T}
-    for m ∈ 1:Alength
-        Asym = Symbol(:A_, m)
-        push!(q.args, :($Asym = vbroadcast($V, @inbounds L[$m])))
-        push!(outtup.args, Asym)
-    end
-    push!(q.args, :($(A.name){$M,$V,$Alength}($outtup) ) )
-    q
-end
-
-
-@generated function Base.:*(
-            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
-        ) where {M,N,W,T,L}
-
-    # register_count = VectorizationBase.REGISTER_COUNT
-    quote
-        $(Expr(:meta,:inline))
-        # Relying on inlining to avoid allocations from allocating AU.
-        AU = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
-        triind = $N
-        @inbounds for n ∈ 0:$(N-1)
-            Ud = U[n+1]
-            @nexprs $M m -> begin
-                v_m = SIMDPirates.vmul(A[m + $M*n], Ud)
-            end
-            for d ∈ 0:n-1
-                triind += 1
-                Ud = U[triind]
-                @nexprs $M m -> begin
-                    v_m = SIMDPirates.vmuladd(A[m + $M*d], Ud, v_m)
-                end
-            end
-            @nexprs $M m -> AU[m + $M*n] = v_m
-        end
-        # ConstantFixedSizePaddedMatrix(AU)
-        AU
-    end
-    # q = quote $(Expr(:meta,:inline)) end
-    # outtupe = Expr(:tuple,)
-    # triind = N
-    # for n in 1:N
-    #     for m in 1:M
-    #         for inner in 1:n-1
-    #             push!(q.args)
-    #         end
-    #     end
-    # end
-
-end
-
-@generated function Base.:*(
-            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            U::LinearAlgebra.Adjoint{T,<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
-        ) where {M,N,W,T,L}
-
-# register_count = VectorizationBase.REGISTER_COUNT
-    quote
-        $(Expr(:meta,:inline))
-        # Relying on inlining to avoid allocations from allocating AU.
-        AUt = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
-        @inbounds for n ∈ 0:$(N-1)
-            increment = n + 1
-            Ud = U[increment]
-            @nexprs $M m -> begin
-                v_m = SIMDPirates.vmul(A[m + $M*n], Ud)
-            end
-            triind = $(N) + reinterpret(Int, reinterpret(UInt, increment*(n+2)) >> 1)
-            for d ∈ n+1:$(N-1)
-                Ud = U[triind]
-                triind += increment
-                increment += 1
-                @nexprs $M m -> begin
-                    v_m = SIMDPirates.vmuladd(A[m + $M*d], Ud, v_m)
-                end
-            end
-            @nexprs $M m -> AUt[m + $M*n] = v_m
-        end
-        # ConstantFixedSizePaddedMatrix(AU)
-        AUt
     end
 end
 

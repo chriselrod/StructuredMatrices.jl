@@ -1,6 +1,6 @@
 
-abstract type AbstractAutoregressiveMatrix{T,V} <: AbstractMatrix{T} end
-abstract type AbstractAutoregressiveMatrixAdjoint{T,V} <: AbstractMatrix{T} end
+abstract type AbstractAutoregressiveMatrix{T,V,S} <: AbstractMatrix{T} end
+abstract type AbstractAutoregressiveMatrixAdjoint{T,V,S} <: AbstractMatrix{T} end
 
 abstract type AbstractInvervalSpacing end
 abstract type AbstractEvenSpacing <: AbstractInvervalSpacing end
@@ -30,7 +30,7 @@ end
     length of these deltas (eg, length(time deltas) == 4 in this example, corresponding to 5 times, or a 5x5 matrix).
 
 """
-struct AutoregressiveMatrixLowerCholeskyInverse{T,V <: AbstractVector, S <: AbstractInvervalSpacing} <: AbstractAutoregressiveMatrix{T,V}
+struct AutoregressiveMatrixLowerCholeskyInverse{T,V <: AbstractVector, S <: AbstractInvervalSpacing} <: AbstractAutoregressiveMatrix{T,V,S}
     ρ::T
     τ::V
     spacing::S
@@ -42,7 +42,7 @@ end
 #     rinvOmρ²ᵗ::TV
 #     τ::V
 # end
-struct AutoregressiveMatrix{T,V <: AbstractVector, S <: AbstractInvervalSpacing} <: AbstractAutoregressiveMatrix{T,V}
+struct AutoregressiveMatrix{T,V <: AbstractVector, S <: AbstractInvervalSpacing} <: AbstractAutoregressiveMatrix{T,V,S}
     ρ::T
     τ::V
     spacing::S
@@ -93,8 +93,8 @@ cache(A::AbstractAutoregressiveMatrix) = A
 @generated function cache(A::AbstractAutoregressiveMatrix{T,V,UnevenSpacing}) where {M,T,L,V <: AbstractFixedSizePaddedVector{M,T,L}}
     quote
         ρᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
-        invOmρ²ᵗ = = MutableFixedSizePaddedVector{$M,$T}(undef)
-        rinvOmρ²ᵗ = = MutableFixedSizePaddedVector{$M,$T}(undef)
+        invOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
+        rinvOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
         @vectorize $T for i ∈ 1:$M
             ρᵗ[i] = SIMDPirates.vcopysign(SIMDPirates.vpow(SIMDPirates.vabs(ρ),  τ[i] ), ρ[i])
             vinvOmρ²ᵗ = 1 / (1 - ρᵗ[i]*ρᵗ[i])
@@ -127,7 +127,7 @@ end
 @inline Base.size(AR::AbstractAutoregressiveMatrix) = (t = length(AR.τ)+1; (t,t))
 # @inline Base.size(AR::AbstractAutoregressiveMatrixAdjoint{T,V}) where {T,V<:AbstractRange} = (t = length(AR.τ); (t,t))
 # @inline Base.size(AR::AbstractAutoregressiveMatrixAdjoint) = (t = length(AR.τ)+1; (t,t))
-function Base.getindex(AR::AutoregressiveMatrixLowerCholeskyInverse{T,V,S}, i, j) where {T,V,S <: AbsractEvenSpacing}
+function Base.getindex(AR::AutoregressiveMatrixLowerCholeskyInverse{T,V,S}, i, j) where {T,V<:AbstractUnitRange,S <: AbstractEvenSpacing}
     @boundscheck max(i,j) > length(ar.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
     if i == j
         if i == 1
@@ -141,7 +141,7 @@ function Base.getindex(AR::AutoregressiveMatrixLowerCholeskyInverse{T,V,S}, i, j
     @fastmath - AR.ρ * AR.spacing.rinvOmρ²ᵗ
 end
 
-function Base.getindex(AR::AutoregressiveMatrixLowerCholeskyInverse{T,V,S}, i, j) where {T,V,S <: AbsractEvenSpacing}
+function Base.getindex(AR::AutoregressiveMatrixLowerCholeskyInverse{T,V,S}, i, j) where {T,V<:AbstractRange,S <: AbstractEvenSpacing}
     @boundscheck max(i,j) > length(ar.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
     if i == j
         if i == 1
@@ -183,12 +183,12 @@ function Base.getindex(AR::AutoregressiveMatrixLowerCholeskyInverse{T,V,S}, i, j
 end
 
 
-@inline function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V,S <: AbsractEvenSpacing}
+@inline function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V<:AbstractUnitRange,S <: AbstractEvenSpacing}
     @boundscheck max(i,j) > length(ar.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
-    SIMDPirates.vcopysign(SLEEFPirates.power(AR.ρ, SIMDPirates.abs(i - j), AR.ρ)
+    SIMDPirates.vcopysign(SLEEFPirates.power(AR.ρ, SIMDPirates.abs(i - j), AR.ρ))
 end
 
-@inline function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V,S <: AbsractEvenSpacing}
+@inline function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V<:AbstractRange,S <: AbstractEvenSpacing}
     @boundscheck max(i,j) > length(ar.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
     SLEEFPirates.power(AR.ρ, step(AR.τ) * SIMDPirates.abs(i - j))
 end
@@ -217,18 +217,18 @@ end
     # if R <: AbstractUnitRange
     #     loop_body = :( $vinvOmρ² * ( B[ 1+m + M*n ] - A.ρ * B[ m + M*n ] ) )
     if S <: AbstractEvenSpacing
-        loop_body = :( AB[ 1+m + $M*n ] = SIMDPirates.evmul( vinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m + $M*n ], B[ 1+m + $M*n ] ) ) )
+        loop_body = :( AB[ 1+m + $M*n ] = SIMDPirates.vmul( vinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m + $M*n ], B[ 1+m + $M*n ] ) ) )
     elseif S == UnevenSpacing
         loop_body = quote
             ρᵗ = A.ρ ^ (A.τ[m])
             rinvOmρ²ᵗ = 1 / sqrt(1 - ρᵗ*ρᵗ)
-            AB[ 1+m + $M*n ] = SIMDPirates.evmul( SIMDPirates.vbroadcast($V, rinvOmρ²ᵗ), SIMDPirates.vfnmadd( SIMDPirates.vbroadcast($V, ρᵗ), B[ m + M*n ], B[ 1+m + M*n ] ) )
+            AB[ 1+m + $M*n ] = SIMDPirates.vmul( SIMDPirates.vbroadcast($V, rinvOmρ²ᵗ), SIMDPirates.vfnmadd( SIMDPirates.vbroadcast($V, ρᵗ), B[ m + M*n ], B[ 1+m + M*n ] ) )
         end
     elseif S == CachedUnevenSpacing
         loop_body = quote
             vinvOmρ² = SIMDPirates.vbroadcast($V, A.spacing.rinvOmρ²ᵗ[m])
             vρᵗ = SIMDPirates.vbroadcast($V, A.ρᵗ[m])
-            AB[ 1+m + $M*n ] = SIMDPirates.evmul( vinvOmρ², SIMDPirates.vfnmadd( vρᵗ, B[ m + M*n ], B[ 1+m + M*n ] ) )
+            AB[ 1+m + $M*n ] = SIMDPirates.vmul( vinvOmρ², SIMDPirates.vfnmadd( vρᵗ, B[ m + M*n ], B[ 1+m + M*n ] ) )
         end
     end
 
@@ -342,21 +342,21 @@ end
                 A_1 = B[1 + $M*n]
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $vrinvOmρ², SIMDPirates.vfnmadd( $vρ, B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
                     end for m ∈ 2:M]...)
             end
         end)
     else
-    # loop_body = :( SIMDPirates.evmul( , SIMDPirates.vfnmadd( , B[ m + M*n ], B[ 1+m + M*n ] ) ) )
+    # loop_body = :( SIMDPirates.vmul( , SIMDPirates.vfnmadd( , B[ m + M*n ], B[ 1+m + M*n ] ) ) )
         push!(q.args, quote
-            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.ρᵗ[$m]))        for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.rinvOmρ²ᵗ[$m])) for m ∈ 1:M-1]...)
+            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.ρᵗ[$m]))        for m ∈ 2:M]...)
+            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.rinvOmρ²ᵗ[$m])) for m ∈ 2:M]...)
             for n ∈ 0:$(N-1)
                 A_1 = B[1 + $M*n]
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vfnmadd( $(Symbol(:ρᵗ,m)), B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vfnmadd( $(Symbol(:ρᵗ,m)), B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
                     end for m ∈ 2:M]...)
             end
@@ -398,23 +398,23 @@ end
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $vrinvOmρ², SIMDPirates.vfnmadd( $vρ, B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
                         product[$m + $M*n] = $(Symbol(:A_,m))
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
                     end for m ∈ 2:M]...)
             end
         end)
     else
-        # loop_body = :( SIMDPirates.evmul( , SIMDPirates.vfnmadd( , B[ m + M*n ], B[ 1+m + M*n ] ) ) )
+        # loop_body = :( SIMDPirates.vmul( , SIMDPirates.vfnmadd( , B[ m + M*n ], B[ 1+m + M*n ] ) ) )
         push!(q.args, quote
-            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.ρᵗ[$m]))        for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.rinvOmρ²ᵗ[$m])) for m ∈ 1:M-1]...)
+            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.ρᵗ[$m]))        for m ∈ 2:M]...)
+            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.rinvOmρ²ᵗ[$m])) for m ∈ 2:M]...)
             for n ∈ 0:$(N-1)
                 A_1 = B[1 + $M*n]
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vfnmadd( $(Symbol(:ρᵗ,m)), B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vfnmadd( $(Symbol(:ρᵗ,m)), B[ $(m-1) + $M*n ], B[ $m + $M*n ] ) )
                         product[$m + $M*n] = $(Symbol(:A_,m))
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
                     end for m ∈ 2:M]...)
@@ -459,37 +459,37 @@ function ∂mul_and_quadform(
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        ρᵗB = SIMDPirates.evmul($vρ, B[$(m-1)+$M*n ])
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $vrinvOmρ², SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
+                        ρᵗB = SIMDPirates.vmul(vρ, B[$(m-1)+$M*n ])
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
                         product[$m + $M*n] = $(Symbol(:A_,m))
 
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
 
-                        δ = SIMDPirates.evmul( $(Symbol(:A_,m)), $vrinvOmρ² )
-                        ∂out = SIMDPirates.vmuladd(SIMDPirates.evmul(δ, ρ⁻¹2), SIMDPirates.vfmsub(δ, ρ²ᵗ, ρᵗB), ∂out)
+                        δ = SIMDPirates.vmul( $(Symbol(:A_,m)), vrinvOmρ² )
+                        ∂out = SIMDPirates.vmuladd(SIMDPirates.vmul(δ, ρ⁻¹2), SIMDPirates.vfmsub(δ, ρ²ᵗ, ρᵗB), ∂out)
 
                     end for m ∈ 2:M]...)
             end
         end)
     elseif S == CachedUnevenSpacing
         push!(q.args, quote
-            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.spacing.rinvOmρ²ᵗ[$m])) for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]))        for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:ρ²ᵗ_,   m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]*A.spacing.ρᵗ[$m])) for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:ρ⁻¹2_, m)) = SIMDPirates.vbroadcast($V, T(2*AR.τ[$m]) / A.ρ)) for m ∈ 1:M-1]...)
+            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.spacing.rinvOmρ²ᵗ[$m])) for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]))        for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρ²ᵗ_,   m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]*A.spacing.ρᵗ[$m])) for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρ⁻¹2_, m)) = SIMDPirates.vbroadcast($V, T(2*AR.τ[$m]) / A.ρ)) for m ∈ 2:M]...)
             for n ∈ 0:$(N-1)
                 A_1 = B[1 + $M*n]
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        ρᵗB = SIMDPirates.evmul($(Symbol(:ρᵗ,     m)), B[$(m-1)+$M*n ])
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
+                        ρᵗB = SIMDPirates.vmul($(Symbol(:ρᵗ,     m)), B[$(m-1)+$M*n ])
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
                         product[$m + $M*n] = $(Symbol(:A_,m))
 
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
 
-                        δ = SIMDPirates.evmul( $(Symbol(:A_,m)), $(Symbol(:riOmρ²_,m)) )
-                        ∂out = SIMDPirates.vmuladd(SIMDPirates.evmul(δ, $(Symbol(:ρ⁻¹2_, m))), SIMDPirates.vfmsub(δ, $(Symbol(:ρ²ᵗ_,   m)), ρᵗB), ∂out)
+                        δ = SIMDPirates.vmul( $(Symbol(:A_,m)), $(Symbol(:riOmρ²_,m)) )
+                        ∂out = SIMDPirates.vmuladd(SIMDPirates.vmul(δ, $(Symbol(:ρ⁻¹2_, m))), SIMDPirates.vfmsub(δ, $(Symbol(:ρ²ᵗ_,   m)), ρᵗB), ∂out)
 
                     end for m ∈ 2:M]...)
             end
@@ -498,11 +498,101 @@ function ∂mul_and_quadform(
         throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
     end
 
-    push!(q.args, :(qf, ConstantFixedSizePaddedMatrix(product)))
+    # push!(q.args, :(qf, ConstantFixedSizePaddedMatrix(product)))
+    # relying on inline to avoid allocations
+    push!(q.args, :(qf, product))
 
     q
 
 end
+
+function ∂selfcrossmul_and_quadform(
+            A::AbstractAutoregressiveMatrix{T,R,S},
+            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+        ) where {T,R,M,N,W,S}
+    V = NTuple{W,Core.VecElement{T}}
+    q = quote
+        $(Expr(:meta, :inline))
+        qf = SIMDPirates.vbroadcast($V, zero($T))
+        product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        ∂out = SIMDPirates.vbroadcast($V, zero($T))
+    end
+    if R <: AbstractUnitRange
+        push!(q.args, quote
+            vrinvOmρ² = SIMDPirates.vbroadcast($V, A.spacing.rinvOmρ²ᵗ)
+            vρ = SIMDPirates.vbroadcast($V, A.ρ)
+            ρ⁻¹2 = SIMDPirates.vbroadcast($V, 2 / A.ρ)
+        end)
+    elseif R <: AbstractRange
+        push!(q.args, quote
+            vrinvOmρ² = SIMDPirates.vbroadcast($V, A.spacing.rinvOmρ²ᵗ)
+            vρ = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ)
+            ρ⁻¹2 = SIMDPirates.vbroadcast($V, T(2*step(AR.τ)) / A.ρ)
+        end)
+    # else
+    end
+    if S <: AbstractEvenSpacing
+        push!(q.args, quote
+            ρ²ᵗ = SIMDPirates.vbroadcast($V, $( R <: AbstractUnitRange ? :(A.ρ*A.ρ) : :(A.spacing.ρᵗ*A.spacing.ρᵗ)  ) )
+            for n ∈ 0:$(N-1)
+                A_1 = B[1 + $M*n]
+                product[1 + $M*n] = A_1
+                δ_1 = A_1
+                qf = SIMDPirates.vmuladd(A_1, A_1, qf)
+                $([quote
+                        ρᵗB = SIMDPirates.vmul(vρ, B[$(m-1)+$M*n ])
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
+
+                        
+                        $(Symbol(:δ_,m)) = SIMDPirates.vmul( $(Symbol(:A_,m)), vrinvOmρ² )
+                        qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
+
+                        product[$(m-1) + $M*n] = SIMDPirates.vmuladd(vρ, $(Symbol(:δ_,m)), $(Symbol(:δ_,m-1)))
+
+
+                        ∂out = SIMDPirates.vmuladd(SIMDPirates.vmul(δ, ρ⁻¹2), SIMDPirates.vfmsub(δ, ρ²ᵗ, ρᵗB), ∂out)
+
+                    end for m ∈ 2:M]...)
+                product[$M + $M*n] = $(Symbol(:δ_,M))
+            end
+        end)
+    elseif S == CachedUnevenSpacing
+        push!(q.args, quote
+            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.spacing.rinvOmρ²ᵗ[$m])) for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]))        for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρ²ᵗ_,   m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]*A.spacing.ρᵗ[$m])) for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρ⁻¹2_, m)) = SIMDPirates.vbroadcast($V, T(2*AR.τ[$m]) / A.ρ)) for m ∈ 2:M]...)
+            for n ∈ 0:$(N-1)
+                A_1 = B[1 + $M*n]
+                product[1 + $M*n] = A_1
+                δ_1 = A_1
+                qf = SIMDPirates.vmuladd(A_1, A_1, qf)
+                $([quote
+                        ρᵗB = SIMDPirates.vmul($(Symbol(:ρᵗ, m)), B[$(m-1)+$M*n ])
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
+                        
+                        $(Symbol(:δ_,m)) = SIMDPirates.vmul( $(Symbol(:A_,m)), $(Symbol(:riOmρ²_,m)) )
+                        qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
+                        product[$(m-1) + $M*n] = SIMDPirates.vmuladd($(Symbol(:ρᵗ, m)), $(Symbol(:δ_,m)), $(Symbol(:δ_,m-1)))
+
+                        ∂out = SIMDPirates.vmuladd(SIMDPirates.vmul(δ, $(Symbol(:ρ⁻¹2_, m))), SIMDPirates.vfmsub(δ, $(Symbol(:ρ²ᵗ_,   m)), ρᵗB), ∂out)
+
+                    end for m ∈ 2:M]...)
+                product[$M + $M*n] = $(Symbol(:δ_,M))
+            end
+        end)
+    else
+        throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
+    end
+
+    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizePaddedMatrix(product)))
+    # relying on inlining to avoid allocations.
+    push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), product))
+
+    q
+
+end
+
 
 
 
@@ -540,10 +630,10 @@ end
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
             end
-            # Base.Cartesian.@nexprs $(N-1) n -> qf_n = SIMDPirates.evmul(A_1, A_1)
+            # Base.Cartesian.@nexprs $(N-1) n -> qf_n = SIMDPirates.vmul(A_1, A_1)
             @vectorize $T for m in 1:$(M-1)
                 $([quote
-                        A_m = SIMDPirates.evmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m + $(M*n-1) ], B[ m + $(M*n) ] ) )
+                        A_m = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m + $(M*n-1) ], B[ m + $(M*n) ] ) )
                         product[m + $(M*n)] = A_m
                         $(Symbol(:qf_,n)) = SIMDPirates.vmuladd(A_m, A_m, $(Symbol(:qf_,n)))
                     end for n in 1:N]...)
@@ -553,7 +643,7 @@ end
             #     product[1 + $M*n] = A_1
             #     qf = SIMDPirates.vmuladd(A_1, A_1, qf)
             #     @vectorize $T for m in 1:$(M-1)
-            #         A_m = SIMDPirates.evmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m - 1 + $M*n ], B[ m + $M*n ] ) )
+            #         A_m = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m - 1 + $M*n ], B[ m + $M*n ] ) )
             #         product[m + $M*n] = A_m
             #         qf = SIMDPirates.vmuladd(A_m, A_m, qf)
             #     end
@@ -575,7 +665,7 @@ end
                 vρ = ρᵗ[m]
                 vrinvOmρ² = rinvOmρ²ᵗ[m]
                 $([quote
-                    A_m = SIMDPirates.evmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m + $(M*n-1) ], B[ m + $(M*n) ] ) )
+                    A_m = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vfnmadd( vρ, B[ m + $(M*n-1) ], B[ m + $(M*n) ] ) )
                     product[m + $(M*n)] = A_m
                     $(Symbol(:qf_,n)) = SIMDPirates.vmuladd(A_m, A_m, $(Symbol(:qf_,n)))
                 end for n in 1:N]...)
@@ -620,37 +710,37 @@ function ∂mul_and_quadform(
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        ρᵗB = SIMDPirates.evmul($vρ, B[$(m-1)+$M*n ])
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $vrinvOmρ², SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
+                        ρᵗB = SIMDPirates.vmul(vρ, B[$(m-1)+$M*n ])
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( vrinvOmρ², SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
                         product[$m + $M*n] = $(Symbol(:A_,m))
 
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
 
-                        δ = SIMDPirates.evmul( $(Symbol(:A_,m)), $vrinvOmρ² )
-                        ∂out = SIMDPirates.vmuladd(SIMDPirates.evmul(δ, ρ⁻¹2), SIMDPirates.vfmsub(δ, ρ²ᵗ, ρᵗB), ∂out)
+                        δ = SIMDPirates.vmul( $(Symbol(:A_,m)), vrinvOmρ² )
+                        ∂out = SIMDPirates.vmuladd(SIMDPirates.vmul(δ, ρ⁻¹2), SIMDPirates.vfmsub(δ, ρ²ᵗ, ρᵗB), ∂out)
 
                     end for m ∈ 2:M]...)
             end
         end)
     elseif S == CachedUnevenSpacing
         push!(q.args, quote
-            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.rinvOmρ²ᵗ[$m])) for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]))        for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:ρ²ᵗ_,   m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]*A.spacing.ρᵗ[$m])) for m ∈ 1:M-1]...)
-            $([ :($(Symbol(:ρ⁻¹2_, m)) = SIMDPirates.vbroadcast($V, T(2*AR.τ[$m]) / A.ρ)) for m ∈ 1:M-1]...)
+            $([ :($(Symbol(:riOmρ²_,m)) = SIMDPirates.vbroadcast($V, A.rinvOmρ²ᵗ[$m])) for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρᵗ_,    m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]))        for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρ²ᵗ_,   m)) = SIMDPirates.vbroadcast($V, A.spacing.ρᵗ[$m]*A.spacing.ρᵗ[$m])) for m ∈ 2:M]...)
+            $([ :($(Symbol(:ρ⁻¹2_, m)) = SIMDPirates.vbroadcast($V, T(2*AR.τ[$m]) / A.ρ)) for m ∈ 2:M]...)
             for n ∈ 0:$(N-1)
                 A_1 = B[1 + $M*n]
                 product[1 + $M*n] = A_1
                 qf = SIMDPirates.vmuladd(A_1, A_1, qf)
                 $([quote
-                        ρᵗB = SIMDPirates.evmul($(Symbol(:ρᵗ, m)), B[$(m-1)+$M*n ])
-                        $(Symbol(:A_,m)) = SIMDPirates.evmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
+                        ρᵗB = SIMDPirates.vmul($(Symbol(:ρᵗ, m)), B[$(m-1)+$M*n ])
+                        $(Symbol(:A_,m)) = SIMDPirates.vmul( $(Symbol(:riOmρ²_,m)), SIMDPirates.vsub(B[$m+$M*n], ρᵗB ) )
                         product[$m + $M*n] = $(Symbol(:A_,m))
 
                         qf = SIMDPirates.vmuladd($(Symbol(:A_,m)), $(Symbol(:A_,m)), qf)
 
-                        δ = SIMDPirates.evmul( $(Symbol(:A_,m)), $(Symbol(:riOmρ²_,m)) )
-                        ∂out = SIMDPirates.vmuladd(SIMDPirates.evmul(δ, $(Symbol(:ρ⁻¹2_, m))), SIMDPirates.vfmsub(δ, $(Symbol(:ρ²ᵗ_,   m)), ρᵗB), ∂out)
+                        δ = SIMDPirates.vmul( $(Symbol(:A_,m)), $(Symbol(:riOmρ²_,m)) )
+                        ∂out = SIMDPirates.vmuladd(SIMDPirates.vmul(δ, $(Symbol(:ρ⁻¹2_, m))), SIMDPirates.vfmsub(δ, $(Symbol(:ρ²ᵗ_,   m)), ρᵗB), ∂out)
 
                     end for m ∈ 2:M]...)
             end

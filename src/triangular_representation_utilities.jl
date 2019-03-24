@@ -11,12 +11,14 @@ struct LowerTriangularMatrix{P,T,L} <: AbstractLowerTriangularMatrix{P,T,L}
 end
 mutable struct MutableLowerTriangularMatrix{P,T,L} <: AbstractLowerTriangularMatrix{P,T,L}
     data::NTuple{L,T}
+    MutableLowerTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
 struct UpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMatrix{P,T,L}
     data::NTuple{L,T}
 end
 mutable struct MutableUpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMatrix{P,T,L}
     data::NTuple{L,T}
+    MutableUpperTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
 
 
@@ -41,6 +43,29 @@ end
 @inline function Base.getindex(A::AbstractDiagTriangularMatrix{P,T,L}, i::Integer) where {P,T,L}
     @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
     @inbounds A.data[i]
+end
+@inline function Base.getindex(A::LinearAlgebra.Adjoint{Union{},<:AbstractDiagTriangularMatrix{P,Vec{W,T},L}}, i::Integer) where {P,T,L,W}
+    @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
+    @inbounds A.parent.data[i]
+end
+
+const MutableDiagTriangle{P,T,L} = Union{MutableLowerTriangularMatrix{P,T,L},MutableUpperTriangularMatrix{P,T,L},MutableSymmetricMatrixL{P,T,L},MutableSymmetricMatrixU{P,T,L}}
+
+@inline Base.pointer(A::MutableDiagTriangle{P,T,L}) where {P,T,L} = Base.unsafe_convert(Ptr{T}, pointer_from_objref(A))
+@inline function Base.pointer(A::MutableDiagTriangle{P,NTuple{W,Core.VecElement{T}},L}) where {P,T,L,W}
+    Base.unsafe_convert(Ptr{T}, pointer_from_objref(A))
+end
+
+
+@inline function Base.setindex!(A::MutableDiagTriangle{P,T,L}, v, i::Integer) where {P,T,L}
+    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    VectorizationBase.store!(pointer(A) + (i-1) * sizeof(T), convert(T,v))
+    v
+end
+@inline function Base.setindex!(A::MutableDiagTriangle{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer) where {P,T,L,W}
+    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    SIMDPirates.vstore!(pointer(A) + (i-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
+    v
 end
 
 #
@@ -89,6 +114,7 @@ end
 
 
 @inline binomial2(n) = (n*(n-1)) >> 1
+# @inline binom2(n::Int) = (nu = reinterpret(UInt, n); reinterpret(Int, (nu*(nu-one(UInt))) >> one(UInt)))
 
 # function padded_diagonal_length(P, T)
 #     Wm1 = VectorizationBase.pick_vector_width(P, T) - 1
