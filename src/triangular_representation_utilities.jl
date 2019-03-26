@@ -20,6 +20,26 @@ mutable struct MutableUpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMat
     data::NTuple{L,T}
     MutableUpperTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+@generated function MutableLowerTriangularMatrix{P,T}(undef) where {P,T}
+    Lbase = binomial2(P+1)
+    W = VectorizationBase.pick_vector_width(Lbase,T)
+    Wm1 = W - 1
+    L = (Lbase + Wm1) & ~Wm1
+    quote
+        $(Expr(:meta,:inline))
+        MutableLowerTriangularMatrix{$P,$T,$L}(undef)
+    end
+end
+@generated function MutableUpperTriangularMatrix{P,T}(undef) where {P,T}
+    Lbase = binomial2(P+1)
+    W = VectorizationBase.pick_vector_width(Lbase,T)
+    Wm1 = W - 1
+    L = (Lbase + Wm1) & ~Wm1
+    quote
+        $(Expr(:meta,:inline))
+        MutableUpperTriangularMatrix{$P,$T,$L}(undef)
+    end
+end
 
 
 abstract type AbstractSymmetricMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
@@ -31,6 +51,7 @@ struct SymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L}
 end
 mutable struct MutableSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L}
     data::NTuple{L,T}
+    MutableSymmetricMatrixL{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
 
 struct SymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L}
@@ -38,7 +59,35 @@ struct SymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L}
 end
 mutable struct MutableSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L}
     data::NTuple{L,T}
+    MutableSymmetricMatrixU{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+@generated function MutableSymmetricMatrixL{P,T}(undef) where {P,T}
+    Lbase = binomial2(P+1)
+    W = VectorizationBase.pick_vector_width(Lbase,T)
+    Wm1 = W - 1
+    L = (Lbase + Wm1) & ~Wm1
+    quote
+        $(Expr(:meta,:inline))
+        MutableSymmetricMatrixL{$P,$T,$L}(undef)
+    end
+end
+@generated function MutableSymmetricMatrixU{P,T}(undef) where {P,T}
+    Lbase = binomial2(P+1)
+    W = VectorizationBase.pick_vector_width(Lbase,T)
+    Wm1 = W - 1
+    L = (Lbase + Wm1) & ~Wm1
+    quote
+        $(Expr(:meta,:inline))
+        MutableSymmetricMatrixU{$P,$T,$L}(undef)
+    end
+end
+
+const AbstractMutableDiagMatrix{P,T,L} = Union{
+    MutableLowerTriangularMatrix{P,T,L},
+    MutableUpperTriangularMatrix{P,T,L},
+    MutableSymmetricMatrixL{P,T,L},
+    MutableSymmetricMatrixU{P,T,L}
+}
 
 @inline function Base.getindex(A::AbstractDiagTriangularMatrix{P,T,L}, i::Integer) where {P,T,L}
     @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")

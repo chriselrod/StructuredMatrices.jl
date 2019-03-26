@@ -9,3 +9,5 @@ Base.@pure StaticUnitRange(R::UnitRange{T}) where {T} = StaticUnitRange{R,T}()
 end
 @generated Base.first(::StaticUnitRange{R}) where {R} = first(R)
 @generated Base.last(::StaticUnitRange{R}) where {R} = last(R)
+@generated Base.length(::StaticUnitRange{R}) where {R} = length(R)
+@generated Base.size(::StaticUnitRange{R}) where {R} = size(R)

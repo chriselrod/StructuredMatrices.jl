@@ -1,6 +1,6 @@
 module StructuredMatrices
 
-using SIMDPirates, SLEEFPirates, VectorizationBase, LinearAlgebra, PaddedMatrices
+using SIMDPirates, SLEEFPirates, VectorizationBase, LinearAlgebra, PaddedMatrices, LoopVectorization
 using PaddedMatrices: AbstractFixedSizePaddedVector, AbstractFixedSizePaddedMatrix
 using VectorizationBase: REGISTER_SIZE, REGISTER_COUNT
 
@@ -17,5 +17,6 @@ include("triangular_matrix.jl")
 include("triangle_inverse.jl")
 include("vector_of_triangular_matrix_operations.jl")
 include("autoregressive_matrix.jl")
+include("block_diagonal.jl")
 
 end # module

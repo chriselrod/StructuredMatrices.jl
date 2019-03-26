@@ -1,15 +1,20 @@
 
-# @generated
-@generated function SIMDPirates.vbroadcast(::Type{Vec{W,T}}, L::AbstractUpperTriangularMatrix{M,T}) where {W,T,M}
+function triangle_vbroadcast_quote(V::DataType, Alength::Int)
     q = quote end
     outtup = Expr(:tuple,)
-    Alength = (M*(M+1)) >> 1
-    V = Vec{W,T}
     for m ∈ 1:Alength
         Asym = Symbol(:A_, m)
         push!(q.args, :($Asym = vbroadcast($V, L[$m])))
         push!(outtup.args, Asym)
     end
+    q, outtup
+end
+
+# @generated
+@generated function SIMDPirates.vbroadcast(::Type{Vec{W,T}}, L::AbstractUpperTriangularMatrix{M,T}) where {W,T,M}
+    Alength = (M*(M+1)) >> 1
+    V = Vec{W,T}
+    q, outtup = triangle_vbroadcast_quote(V, Alength)
     # push!(q.args, :($(A.name){$M,$V,$Alength}($outtup) ) )
     quote
         @inbounds begin
@@ -20,15 +25,9 @@
     end
 end
 @generated function SIMDPirates.vbroadcast(::Type{Vec{W,T}}, L::AbstractLowerTriangularMatrix{M,T}) where {W,T,M}
-    q = quote end
-    outtup = Expr(:tuple,)
     Alength = (M*(M+1)) >> 1
     V = Vec{W,T}
-    for m ∈ 1:Alength
-        Asym = Symbol(:A_, m)
-        push!(q.args, :($Asym = vbroadcast($V, L[$m])))
-        push!(outtup.args, Asym)
-    end
+    q, outtup = triangle_vbroadcast_quote(V, Alength)
     # push!(q.args, :($(A.name){$M,$V,$Alength}($outtup) ) )
     quote
         @inbounds begin
@@ -39,12 +38,101 @@ end
     end
 end
 
-function mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add = true)
+@generated function Base.zero(::Type{LT}) where {N,W,T, LT <: AbstractMutableDiagMatrix{N,Vec{W,T}}}
+    quote
+        $(Expr(:meta,:inline))
+        out = $LT(undef)
+        z = vbroadcast(Vec{$W,$T}, zero($T))
+        @inbounds for i ∈ 1:$(binomial2(N+1))
+            out[i] = z
+        end
+        out
+    end
+end
+
+function triangle_vsum_quote(T::DataType,M::Int,L::Int,Lfull::Int)
+    quote
+        @inbounds for l ∈ 1:$L
+            out[l] = SIMDPirates.vsum(triangle[$l])
+        end
+        @inbounds for l ∈ $(L+1):$Lfull
+            out[l] = zero($T)
+        end
+    end
+end
+@generated function SIMDPirates.vsum(triangle::AbstractLowerTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
+    Lfull = VectorizationBase.pick_vector_width(L, T)
+    q = triangle_vsum_quote(T,M,L,Lfull)
+    quote
+        $(Expr(:meta,:inline))
+        out = $(Expr(:call, Expr(:curly, MutableLowerTriangularMatrix, M, T, Lfull), undef))
+        $q
+        out
+    end
+end
+@generated function SIMDPirates.vsum(triangle::AbstractUpperTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
+    Lfull = VectorizationBase.pick_vector_width(L, T)
+    q = triangle_vsum_quote(T,M,L,Lfull)
+    quote
+        $(Expr(:meta,:inline))
+        out = $(Expr(:call, Expr(:curly, MutableUpperTriangularMatrix, M, T, Lfull), undef))
+        $q
+        out
+    end
+end
+@generated function vsumvec(triangle::AbstractDiagTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
+    quote
+        $(Expr(:meta,:inline))
+        @inbounds begin
+            $([:( $(Symbol(:t_,l)) = SIMDPirates.vsum(triangle[$l]) ) for l ∈ 1:L]...)
+        end
+        outtup = $(Expr(:tuple, [Symbol(:t_,l) for l ∈ 1:L]...))
+        $(Expr(:call, Expr(:curly, :(PaddedMatrices.ConstantFixedSizePaddedVector), M, T, L), outtup))
+    end
+end
+
+# function triangle_vsum_quote(T::DataType,M::Int,L::Int,Lfull::Int)
+#     q = quote end
+#     outtup = Expr(:tuple,)
+#     for l ∈ 1:L
+#         sym = Symbol(:triangle_, l)
+#         push!(q.args, :($sym = SIMDPirates.vsum(triangle[$l])))
+#         push!(outtup.args, sym)
+#     end
+#     for l ∈ L+1:Lfull
+#         push!(outtup.args, zero(T))
+#     end
+#     q, outtup
+# end
+#
+# @generated function SIMDPirates.vsum(triangle::AbstractLowerTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
+#     Lfull = VectorizationBase.pick_vector_width(L, T)
+#     q, outtup = triangle_vsum_quote(T,M,L,Lfull)
+#     quote
+#         @inbounds begin
+#             $q
+#         end
+#         $(Expr(:call, Expr(:curly, LowerTriangularMatrix, M, T, Lfull), outtup))
+#     end
+# end
+# @generated function SIMDPirates.vsum(triangle::AbstractUpperTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
+#     Lfull = VectorizationBase.pick_vector_width(L, T)
+#     q, outtup = triangle_vsum_quote(T,M,L,Lfull)
+#     quote
+#         @inbounds begin
+#             $q
+#         end
+#         $(Expr(:call, Expr(:curly, UpperTriangularMatrix, M, T, Lfull), outtup))
+#     end
+# end
+
+function mkernel_triangle_AU_quote(kernel_size_m::Int, kernel_size_n::Int, mindexpr, nindexpr, add::Bool = true, W::Int = 0, T::DataType = Float64)
     muladdfunc = add ? :vmuladd : :vfnmadd
 
     # kernel_size = kernel_size_n #min(kernel_size_m, kernel_size_n)
     # @assert kernel_size == kernel_size_m
     # Assumes A_m_n block is already loaded
+
     q = quote end
     for nouter in 1:kernel_size_n
         for m in 1:kernel_size_m
@@ -52,10 +140,11 @@ function mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, ninde
         end
         for ninner in 1:nouter
             if ninner == nouter
-                push!(q.args, :(vU = U[ $nindexpr + $ninner ] ))
+                Uind = :(U[ $nindexpr + $ninner ])
             else
-                push!(q.args, :(vU = U[ triangle_ind_tuple[$nouter + $nindexpr] + $ninner + $nindexpr ] ))
+                Uind = :(U[ triangle_ind_tuple[$nouter + $nindexpr] + $ninner + $nindexpr ])
             end
+            W == 0 ? push!(q.args, :(vU = $Uind )) : push!(q.args, :(vU = vbroadcast(Vec{$W,$T}, $Uind) ))
             for m in 1:kernel_size_m
                 AUsym = Symbol(:AU_,m)
                 push!(q.args, :( $AUsym = SIMDPirates.$muladdfunc($(Symbol(:A_,m,:_,ninner)), vU, $AUsym) ) )
@@ -67,14 +156,16 @@ function mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, ninde
     end
     q
 end
-function square_iterations_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, N, add)
+function square_iterations_AU_quote(kernel_size_m::Int, kernel_size_n::Int, mindexpr, nindexpr, N::Int, add::Bool, W::Int, T::DataType)
     muladdfunc = add ? :vmuladd : :vfnmadd
+    vUind = :(U[ $nindexpr + n + triangle_ind_tuple[ncol_iter] ])
+    vUexpr = W == 0 ? vUind : :(vbroadcast(Vec{$W,$T}, $vUind))
     quote
         # Base.Cartesian.@nexprs $kernel_size_n n -> Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[$mindexpr+m,$nindexpr+n]
         for ncol_iter in $(nindexpr)+$(kernel_size_n+1):$N
             Base.Cartesian.@nexprs $kernel_size_m m -> AU_m = AU[m + $mindexpr, ncol_iter]
             Base.Cartesian.@nexprs $kernel_size_n n -> begin
-                vU = U[ $nindexpr + n + triangle_ind_tuple[ncol_iter] ]
+                vU = $vUexpr
                 Base.Cartesian.@nexprs $kernel_size_m m -> begin
                     AU_m = SIMDPirates.$muladdfunc(A_m_n, vU, AU_m)
                 end
@@ -83,7 +174,7 @@ function square_iterations_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nind
         end
     end
 end
-function mkern_iteration_AU_quote(kernel_size_m, kernel_size_n, nk, nr, mindexpr, N, add)
+function mkern_iteration_AU_quote(kernel_size_m::Int, kernel_size_n::Int, nk::Int, nr::Int, mindexpr, N::Int, add::Bool, W::Int, T::DataType)
     nindexpr = :(nkern * $kernel_size_n)
     if nr == 0
         q = quote
@@ -91,8 +182,8 @@ function mkern_iteration_AU_quote(kernel_size_m, kernel_size_n, nk, nr, mindexpr
                 Base.Cartesian.@nexprs $kernel_size_n n -> begin
                     Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[m+$mindexpr,n+$nindexpr]
                 end
-                $(mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add))
-                $(square_iterations_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, N, add))
+                $(mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add, W, T))
+                $(square_iterations_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, N, add, W, T))
             end
         end
     else
@@ -102,19 +193,19 @@ function mkern_iteration_AU_quote(kernel_size_m, kernel_size_n, nk, nr, mindexpr
                 Base.Cartesian.@nexprs $kernel_size_n n -> begin
                     Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[m+$mindexpr,n+$nindexpr]
                 end
-                $(mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add))
-                $(square_iterations_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, N, add))
+                $(mkernel_triangle_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add, W, T))
+                $(square_iterations_AU_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, N, add, W, T))
             end
             Base.Cartesian.@nexprs $nr n -> begin
                 Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[m+$mindexpr,n+$(nk*kernel_size_n)]
             end
-            $(mkernel_triangle_AU_quote(kernel_size_m, nr, mindexpr, nk * kernel_size_n, add))
+            $(mkernel_triangle_AU_quote(kernel_size_m, nr, mindexpr, nk * kernel_size_n, add, W, T))
         end
     end
     q
 end
 
-function matrix_upper_triangle_mul_quote(M, N, T, add = true)
+function matrix_upper_triangle_mul_quote(M::Int, N::Int, T::DataType, add::Bool = true, W::Int = 0)
     mk, mr, nk, nr, kernel_size_m, kernel_size_n = PaddedMatrices.determine_pattern(M,N)
 
     if nr > 0
@@ -147,11 +238,11 @@ function matrix_upper_triangle_mul_quote(M, N, T, add = true)
     q = quote
         triangle_ind_tuple = $q_triangle_ind_defs
         for mkern in 0:$(mk-1)
-            $(mkern_iteration_AU_quote(kernel_size_m, kernel_size_n, nk, nr, :(mkern * $kernel_size_m), N, add))
+            $(mkern_iteration_AU_quote(kernel_size_m, kernel_size_n, nk, nr, :(mkern * $kernel_size_m), N, add, W, T))
         end
     end
     if mr > 0
-        push!(q.args, mkern_iteration_AU_quote(mr, kernel_size_n, nk, nr, mk * kernel_size_m, N, add))
+        push!(q.args, mkern_iteration_AU_quote(mr, kernel_size_n, nk, nr, mk * kernel_size_m, N, add, W, T))
     end
     q
 end
@@ -159,129 +250,98 @@ end
 
 
 @generated function Base.:*(
-# @generated function mult(
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
         ) where {M,N,T,W,L}
 
-    # register_count = VectorizationBase.REGISTER_COUNT
-    # quote
-    #     $(Expr(:meta,:inline))
-    #     # Relying on inlining to avoid allocations from allocating AU.
-    #     AU = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
-    #     triind = $N
-    #     @inbounds for n ∈ 0:$(N-1)
-    #         Ud = U[n+1]
-    #         @nexprs $M m -> begin
-    #             v_m = SIMDPirates.vmul(A[m + $M*n], Ud)
-    #         end
-    #         for d ∈ 0:n-1
-    #             triind += 1
-    #             Ud = U[triind]
-    #             @nexprs $M m -> begin
-    #                 v_m = SIMDPirates.vmuladd(A[m + $M*d], Ud, v_m)
-    #             end
-    #         end
-    #         @nexprs $M m -> AU[m + $M*n] = v_m
-    #     end
-    #     # ConstantFixedSizePaddedMatrix(AU)
-    #     AU
-    # end
-    # q = quote $(Expr(:meta,:inline)) end
-    # outtupe = Expr(:tuple,)
-    # triind = N
-    # for n in 1:N
-    #     for m in 1:M
-    #         for inner in 1:n-1
-    #             push!(q.args)
-    #         end
-    #     end
-    # end
     quote
         $(Expr(:meta,:inline))
         AU = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         @inbounds for i in 1:$(M*N)
-            AU[i] = vbroadcast(Vec{$W,$T}, zero($T))  
+            AU[i] = vbroadcast(Vec{$W,$T}, zero($T))
         end
-        $(matrix_upper_triangle_mul_quote(M, N, T, true))
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, true, 0))
+        end
+        AU
+    end
+end
+@generated function Base.:*(
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            U::AbstractUpperTriangularMatrix{N,T,L}
+        ) where {M,N,T,W,L}
+
+    quote
+        $(Expr(:meta,:inline))
+        AU = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        @inbounds for i in 1:$(M*N)
+            AU[i] = vbroadcast(Vec{$W,$T}, zero($T))
+        end
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, true, W))
+        end
+        AU
+    end
+end
+
+@generated function addmul!(
+            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
+        ) where {M,N,W,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, true, 0))
+        end
         AU
     end
 end
 @generated function addmul!(
             AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
+            U::AbstractUpperTriangularMatrix{N,T,L}
         ) where {M,N,W,T,L}
-
-    # register_count = VectorizationBase.REGISTER_COUNT
-    # quote
-    #     $(Expr(:meta,:inline))
-    #     # Relying on inlining to avoid allocations from allocating AU.
-        
-    #     triind = $N
-    #     @inbounds for n ∈ 0:$(N-1)
-    #         Ud = U[n+1]
-    #         @nexprs $M m -> v_m = AU[m + $M*n]
-    #         @nexprs $M m -> begin
-    #             v_m = SIMDPirates.vmuladd(A[m + $M*n], Ud, v_m)
-    #         end
-    #         for d ∈ 0:n-1
-    #             triind += 1
-    #             Ud = U[triind]
-    #             @nexprs $M m -> begin
-    #                 v_m = SIMDPirates.vmuladd(A[m + $M*d], Ud, v_m)
-    #             end
-    #         end
-    #         @nexprs $M m -> AU[m + $M*n] = v_m
-    #     end
-    #     # ConstantFixedSizePaddedMatrix(AU)
-    #     AU
-    # end
     quote
         $(Expr(:meta,:inline))
-        $(matrix_upper_triangle_mul_quote(M, N, T, true))
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, true, W))
+        end
         AU
     end
 end
+
 @generated function submul!(
             AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
         ) where {M,N,W,T,L}
 
-    # register_count = VectorizationBase.REGISTER_COUNT
-    # quote
-    #     $(Expr(:meta,:inline))
-    #     # Relying on inlining to avoid allocations from allocating AU.
-        
-    #     triind = $N
-    #     @inbounds for n ∈ 0:$(N-1)
-    #         Ud = U[n+1]
-    #         @nexprs $M m -> v_m = AU[m + $M*n]
-    #         @nexprs $M m -> begin
-    #             v_m = SIMDPirates.vfnmadd(A[m + $M*n], Ud, v_m)
-    #         end
-    #         for d ∈ 0:n-1
-    #             triind += 1
-    #             Ud = U[triind]
-    #             @nexprs $M m -> begin
-    #                 v_m = SIMDPirates.vfnmadd(A[m + $M*d], Ud, v_m)
-    #             end
-    #         end
-    #         @nexprs $M m -> AU[m + $M*n] = v_m
-    #     end
-    #     # ConstantFixedSizePaddedMatrix(AU)
-    #     AU
-    # end
     quote
         $(Expr(:meta,:inline))
-        $(matrix_upper_triangle_mul_quote(M, N, T, false))
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, false, 0))
+        end
+        AU
+    end
+end
+@generated function submul!(
+            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            U::AbstractUpperTriangularMatrix{N,T,L}
+        ) where {M,N,W,T,L}
+
+    quote
+        $(Expr(:meta,:inline))
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, false, W))
+        end
         AU
     end
 end
 
 
-function mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add = true)
+function mkernel_end_AUt_quote(kernel_size_m::Int, kernel_size_n::Int, mindexpr, nindexpr, add::Bool = true, W::Int = 0, T::DataType = Float64)
     muladdfunc = add ? :vmuladd : :vfnmadd
 
     # kernel_size = min(kernel_size_m, kernel_size_n)
@@ -294,10 +354,11 @@ function mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr,
         end
         for ninner in nouter:kernel_size_n
             if ninner == nouter
-                push!(q.args, :(vUt = Ut[ $nindexpr + $nouter ] ))
+                Utind = :(Ut[ $nindexpr + $nouter ])
             else
-                push!(q.args, :(vUt = Ut[ $(Symbol(:triangle_ind_,  ninner)) + $nindexpr + $nouter ] ))
+                Utind = :(Ut[ $(Symbol(:triangle_ind_,  ninner)) + $nindexpr + $nouter ] )
             end
+            W == 0 ? push!(q.args, :(vUt = $Utind)) : push!(q.args, :(vUt = vbroadcast(Vec{$W,$T}, $Utind)))
             for m in 1:kernel_size_m
                 AUtsym = Symbol(:AUt_,m)
                 push!(q.args, :( $AUtsym = SIMDPirates.$muladdfunc($(Symbol(:A_,m,:_,ninner)), vUt, $AUtsym) ) )
@@ -309,14 +370,15 @@ function mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr,
     end
     q
 end
-function square_iterations_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add)
+function square_iterations_AUt_quote(kernel_size_m::Int, kernel_size_n::Int, mindexpr, nindexpr, add::Bool, W::Int, T::DataType)
     muladdfunc = add ? :vmuladd : :vfnmadd
+    vUtexpr = W == 0 ? :(Ut[ triangle_ind_n + ncol_iter ]) : :(vbroadcast(Vec{$W,$T}, Ut[ triangle_ind_n + ncol_iter ]))
     quote
         # Base.Cartesian.@nexprs $kernel_size_n n -> Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[$mindexpr+m,$nindexpr+n]
         for ncol_iter in 1:$(nindexpr)
             Base.Cartesian.@nexprs $kernel_size_m m -> AUt_m = AUt[m + $mindexpr, ncol_iter]
             Base.Cartesian.@nexprs $kernel_size_n n -> begin
-                vUt = Ut[ triangle_ind_n + ncol_iter ]
+                vUt = $vUtexpr
                 Base.Cartesian.@nexprs $kernel_size_m m -> begin
                     AUt_m = SIMDPirates.$muladdfunc(A_m_n, vUt, AUt_m)
                 end
@@ -325,7 +387,7 @@ function square_iterations_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nin
         end
     end
 end
-function mkern_iteration_AUt_quote(kernel_size_m, kernel_size_n, nk, nr, mindexpr, add)
+function mkern_iteration_AUt_quote(kernel_size_m::Int, kernel_size_n::Int, nk::Int, nr::Int, mindexpr, add::DataType, W::Int, T::DataType)
     if nr == 0
         nindexpr = :(nkern * $kernel_size_n)
         q = quote
@@ -334,8 +396,8 @@ function mkern_iteration_AUt_quote(kernel_size_m, kernel_size_n, nk, nr, mindexp
                     triangle_ind_n = triangle_ind_tuple[n + $nindexpr]
                     Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[m+$mindexpr,n+$nindexpr]
                 end
-                $(square_iterations_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add))
-                $(mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add))
+                $(square_iterations_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add, W, T))
+                $(mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add, W, T))
             end
         end
     else
@@ -345,21 +407,21 @@ function mkern_iteration_AUt_quote(kernel_size_m, kernel_size_n, nk, nr, mindexp
                 triangle_ind_n = triangle_ind_tuple[n]
                 Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[m+$mindexpr,n]
             end
-            $(mkernel_end_AUt_quote(kernel_size_m, nr, mindexpr, 0, add))
+            $(mkernel_end_AUt_quote(kernel_size_m, nr, mindexpr, 0, add, W, T))
             for nkern in 0:$(nk-1)
                 Base.Cartesian.@nexprs $kernel_size_n n -> begin
                     triangle_ind_n = triangle_ind_tuple[n + $nindexpr]
                     Base.Cartesian.@nexprs $kernel_size_m m -> A_m_n = A[m+$mindexpr,n+$nindexpr]
                 end
-                $(square_iterations_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add))
-                $(mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add))
+                $(square_iterations_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add, W, T))
+                $(mkernel_end_AUt_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add, W, T))
             end
         end
     end
     q
 end
 
-function matrix_adjoint_upper_triangle_mul_quote(M, N, T, add = true)
+function matrix_adjoint_upper_triangle_mul_quote(M::Int, N::Int, T::DataType, add::Bool = true, W::Int = 0)
     mk, mr, nk, nr, kernel_size_m, kernel_size_n = PaddedMatrices.determine_pattern(M,N)
 
     if nr > 0
@@ -392,54 +454,46 @@ function matrix_adjoint_upper_triangle_mul_quote(M, N, T, add = true)
     q = quote
         triangle_ind_tuple = $q_triangle_ind_defs
         for mkern in 0:$(mk-1)
-            $(mkern_iteration_AUt_quote(kernel_size_m, kernel_size_n, nk, nr, :(mkern * $kernel_size_m), add))
+            $(mkern_iteration_AUt_quote(kernel_size_m, kernel_size_n, nk, nr, :(mkern * $kernel_size_m), add, W, T))
         end
     end
     if mr > 0
-        push!(q.args, mkern_iteration_AUt_quote(mr, kernel_size_n, nk, nr, mk * kernel_size_m, add))
+        push!(q.args, mkern_iteration_AUt_quote(mr, kernel_size_n, nk, nr, mk * kernel_size_m, add, W, T))
     end
     q
 end
 
 @generated function Base.:*(
-# @generated function mult(
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
         ) where {M,N,W,T,L}
-
-# register_count = VectorizationBase.REGISTER_COUNT
-    # quote
-    #     $(Expr(:meta,:inline))
-    #     # Relying on inlining to avoid allocations from allocating AU.
-    #     AUt = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
-    #     @inbounds for n ∈ 0:$(N-1)
-    #         increment = n + 1
-    #         Ud = U[increment]
-    #         @nexprs $M m -> begin
-    #             v_m = SIMDPirates.vmul(A[m + $M*n], Ud)
-    #         end
-    #         triind = $(N) + reinterpret(Int, reinterpret(UInt, increment*(n+2)) >> 1)
-    #         for d ∈ n+1:$(N-1)
-    #             Ud = U[triind]
-    #             triind += increment
-    #             increment += 1
-    #             @nexprs $M m -> begin
-    #                 v_m = SIMDPirates.vmuladd(A[m + $M*d], Ud, v_m)
-    #             end
-    #         end
-    #         @nexprs $M m -> AUt[m + $M*n] = v_m
-    #     end
-    #     # ConstantFixedSizePaddedMatrix(AU)
-    #     AUt
-    # end
     quote
         $(Expr(:meta,:inline))
         AUt = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         # AU = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         @inbounds for i in 1:$(M*N)
-            AUt[i] = vbroadcast(Vec{$W,$T}, zero($T))  
+            AUt[i] = vbroadcast(Vec{$W,$T}, zero($T))
         end
-        $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, true))
+        @inbounds begin
+            $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, true, 0))
+        end
+        AUt
+    end
+end
+@generated function Base.:*(
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,T,L}}
+        ) where {M,N,W,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        AUt = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        # AU = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        @inbounds for i in 1:$(M*N)
+            AUt[i] = vbroadcast(Vec{$W,$T}, zero($T))
+        end
+        @inbounds begin
+            $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, true, W))
+        end
         AUt
     end
 end
@@ -449,72 +503,57 @@ end
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
         ) where {M,N,W,T,L}
-    # quote
-    #     $(Expr(:meta,:inline))
-    #     @inbounds for n ∈ 0:$(N-1)
-    #         increment = n + 1
-    #         Ud = U[increment]
-    #         @nexprs $M m -> v_m = AUt[m + $M*n]
-    #         @nexprs $M m -> begin
-    #             v_m = SIMDPirates.vmuladd(A[m + $M*n], Ud, v_m)
-    #         end
-    #         triind = $(N) + reinterpret(Int, reinterpret(UInt, increment*(n+2)) >> 1)
-    #         for d ∈ n+1:$(N-1)
-    #             Ud = U[triind]
-    #             triind += increment
-    #             increment += 1
-    #             @nexprs $M m -> begin
-    #                 v_m = SIMDPirates.vmuladd(A[m + $M*d], Ud, v_m)
-    #             end
-    #         end
-    #         @nexprs $M m -> AUt[m + $M*n] = v_m
-    #     end
-    #     # ConstantFixedSizePaddedMatrix(AU)
-    #     AUt
-    # end
     quote
         $(Expr(:meta,:inline))
-        $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, true))
+        @inbounds begin
+            $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, true, 0))
+        end
+        AUt
+    end
+end
+@generated function addmul!(
+            AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,T,L}}
+        ) where {M,N,W,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        @inbounds begin
+            $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, true, W))
+        end
+        AUt
+    end
+end
+
+@generated function submul!(
+            AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
+        ) where {M,N,W,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        @inbounds begin
+            $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, false, 0))
+        end
         AUt
     end
 end
 @generated function submul!(
             AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
+            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,T,L}}
         ) where {M,N,W,T,L}
-    # quote
-    #     $(Expr(:meta,:inline))
-    #     @inbounds for n ∈ 0:$(N-1)
-    #         increment = n + 1
-    #         Ud = U[increment]
-    #         @nexprs $M m -> v_m = AUt[m + $M*n]
-    #         @nexprs $M m -> begin
-    #             v_m = SIMDPirates.vfnmadd(A[m + $M*n], Ud, v_m)
-    #         end
-    #         triind = $(N) + reinterpret(Int, reinterpret(UInt, increment*(n+2)) >> 1)
-    #         for d ∈ n+1:$(N-1)
-    #             Ud = U[triind]
-    #             triind += increment
-    #             increment += 1
-    #             @nexprs $M m -> begin
-    #                 v_m = SIMDPirates.vfnmadd(A[m + $M*d], Ud, v_m)
-    #             end
-    #         end
-    #         @nexprs $M m -> AUt[m + $M*n] = v_m
-    #     end
-    #     # ConstantFixedSizePaddedMatrix(AU)
-    #     AUt
-    # end
     quote
         $(Expr(:meta,:inline))
-        $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, false))
+        @inbounds begin
+            $(matrix_adjoint_upper_triangle_mul_quote(M, N, T, false, W))
+        end
         AUt
     end
 end
 
 
-function mkernal_start_triangle_view_quote(kernel_size_m, kernel_size_n, mindexpr, nindexpr, add)
+function mkernal_start_triangle_view_quote(kernel_size_m::Int, kernel_size_n::Int, mindexpr, nindexpr, add::Bool)#, W::Int, T::DataType)
     muladdfunc = add ? :vmuladd : :vfnmadd
 
     load_As = quote
@@ -640,11 +679,11 @@ function mkernal_start_triangle_view_quote(kernel_size_m, kernel_size_n, mindexp
     mkern_start
 end
 
-function square_iterations_triangle_view_quote(kernel_size_m, kernel_size_n, nindexpr, M, add)
+function square_iterations_triangle_view_quote(kernel_size_m::Int, kernel_size_n::Int, nindexpr, M::Int, add::Bool)
     muladdfunc = add ? :vmuladd : :vfnmadd
     ## The operation is UpperTriangle(MxN * NxM) matrices A and B
     ## this function iterates across the columns of the upper triangular product
-    ## The idea of this function is to iterate from 
+    ## The idea of this function is to iterate from
     quote
         for m_coliter in m_col+$kernel_size_m:$M
             Base.Cartesian.@nexprs $kernel_size_m m -> begin
@@ -664,7 +703,7 @@ function square_iterations_triangle_view_quote(kernel_size_m, kernel_size_n, nin
     end
 end
 
-function mul_mat_of_vecs_upper_triangle_view_quote(M,N,W,T,add = true)
+function mul_mat_of_vecs_upper_triangle_view_quote(M::Int,N::Int,W::Int,T::DataType,add::Bool = true)
 
     mk, mr, nk, nr, kernel_size_m, kernel_size_n = PaddedMatrices.determine_pattern(M,N)
     P = M
@@ -736,7 +775,7 @@ end
 
     quote
         $(Expr(:meta,:inline))
-        $(mul_mat_of_vecs_upper_triangle_view_quote(M,N,W,T))
+        $(mul_mat_of_vecs_upper_triangle_view_quote(M,N,W,T,true))
     end
 end
 @generated function submul!(
@@ -765,7 +804,6 @@ end
         @inbounds for l in 1:$L
             U[l] = vzero
         end
-        $(mul_mat_of_vecs_upper_triangle_view_quote(M,N,W,T))
+        $(mul_mat_of_vecs_upper_triangle_view_quote(M,N,W,T,true))
     end
 end
-

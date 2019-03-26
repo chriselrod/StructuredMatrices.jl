@@ -46,12 +46,26 @@ for large matrices.
 @generated function LinearAlgebra.logdet(A::AbstractTriangularMatrix{P,T,L}) where {P,T,L}
     quote
         out = zero(T)
-        @vectorize for i ∈ 1:$P
+        @vectorize $T for i ∈ 1:$P
             out += log(A[i])
         end
         out
     end
 end
+
+@generated function ∂logdet(A::AbstractTriangularMatrix{P,T,L}) where {P,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        out = zero(T)
+        ∂out = PaddedMatrices.MutableFixedSizePaddedVector{$P,$T}(undef)
+        @vectorize $T for i ∈ 1:$P
+            out += log(A[i])
+            ∂out[i] = one($T) / A[i]
+        end
+        out, ∂out
+    end
+end
+
 #
 # function lower_chol_small(P,T,L = calculate_L(P, T))
 #     W, Wshift = VectorizationBase.pick_vector_width_shift(P, T)
@@ -349,4 +363,3 @@ end
         end
     end
 end
-
