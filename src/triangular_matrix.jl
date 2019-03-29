@@ -363,3 +363,18 @@ end
         end
     end
 end
+@generated function inv′(Lt::AbstractLowerTriangularMatrix{P,T,L}) where {P,T,L}
+    q = quote end
+    qa = q.args
+    load_packed_L_quote!(qa, P, :Lt, :Lt)
+    PaddedMatrices.inv_L_core_quote!(qa, P, :U, :Lt, T)
+    uq = store_packed_Ut_quote!(qa, P, :U, T, L)
+    quote
+        $(Expr(:meta,:inline))
+        @fastmath @inbounds begin
+            # begin
+            $q
+            $uq
+        end
+    end
+end

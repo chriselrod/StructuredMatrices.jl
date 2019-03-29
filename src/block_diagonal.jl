@@ -9,7 +9,7 @@ function Base.getindex(bd::BlockDiagonalColumnView{M,N,T,P,L}) where {M,N,T,P,L}
 end
 Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
 
-@generated function Base.:*(BD::BlockDiagonalColumnView{M,N,T,P,L}, A::AbstractFixedSizePaddedMatrix{M,N,T,P,L}) where {M,N,T}
+@generated function Base.:*(BD::BlockDiagonalColumnView{M,N,T,P,L}, A::AbstractFixedSizePaddedMatrix{M,N,T,P,L}) where {M,N,T,P,L}
     q = quote
         c = MutableFixedSizePaddedVector{N,T}(undef)
         for n ∈ 0:$(N>>2-1)

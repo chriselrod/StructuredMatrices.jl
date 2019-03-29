@@ -92,7 +92,12 @@ end
 τ must be a vector of differences.
 """
 function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractVector) where {T}
-    AutoregressiveMatrixLowerCholeskyInverse(
+    cache(AutoregressiveMatrixLowerCholeskyInverse(
+        ρ, τ, UnevenSpacing()
+    ))
+end
+function AutoregressiveMatrix(ρ::T, τ::AbstractVector) where {T}
+    AutoregressiveMatrix(
         ρ, τ, UnevenSpacing()
     )
 end
@@ -200,26 +205,39 @@ end
 
 
 @inline function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V<:AbstractUnitRange,S <: AbstractEvenSpacing}
-    @boundscheck max(i,j) > length(AR.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
+    @boundscheck max(i,j)-1 > length(AR.τ) && PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
     SIMDPirates.vcopysign(SLEEFPirates.power(AR.ρ, SIMDPirates.abs(i - j), AR.ρ))
 end
 
 @inline function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V<:AbstractRange,S <: AbstractEvenSpacing}
-    @boundscheck max(i,j) > length(AR.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
+    @boundscheck max(i,j)-1 > length(AR.τ) && PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
     SLEEFPirates.power(AR.ρ, step(AR.τ) * SIMDPirates.abs(i - j))
 end
 
-# function Base.getindex(AR::AutoregressiveMatrix{T,V}, i, j) where {T,V <: AbstractVector}
-#     @boundscheck max(i,j) > length(AR.τ) || PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
-#     i == j && return one(T)
-#     δt = zero(T)
-#     i, j = minmax(i, j)
-#     for k ∈ i:j-1
-#         δt += AR.τ[k]
-#     end
-#     ρᵗ = abs(AR.ρ)^δt
-#     iseven(j - i) ? ρᵗ : copysign(ρᵗ, AR.ρ)
-# end
+function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V <: AbstractVector,S <: AbstractUnevenSpacing}
+    @boundscheck max(i,j)-1 > length(AR.τ) && PaddedMatrices.ThrowBoundsError("max(i,j) = $(max(i,j)) > length(AR.τ) = $(length(AR.τ)).")
+    i == j && return one(T)
+    δt = zero(T)
+    i, j = minmax(i, j)
+    for k ∈ i:j-1
+        δt += AR.τ[k]
+    end
+    ρᵗ = abs(AR.ρ)^δt
+    iseven(j - i) ? ρᵗ : copysign(ρᵗ, AR.ρ)
+end
+
+@inline function PaddedMatrices.MutableFixedSizePaddedMatrix(AR::AutoregressiveMatrix{T,<:AbstractFixedSizePaddedVector{M}}) where {T,M}
+    pAR = MutableFixedSizePaddedMatrix{M+1,M+1,T}(undef)
+    @inbounds for mc ∈ 1:M+1
+        for mr ∈ 1:M+1
+            pAR[mr,mc] = AR[mr,mc]
+        end
+    end
+    pAR
+end
+function PaddedMatrices.ConstantFixedSizePaddedMatrix(AR::AutoregressiveMatrix{T,<:AbstractFixedSizePaddedVector{M}}) where {T,M}
+    ConstantFixedSizePaddedMatrix(MutableFixedSizePaddedMatrix(AR))
+end
 
 
 @generated function Base.:*(

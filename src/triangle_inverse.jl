@@ -49,6 +49,28 @@ end
     x⁻² = x⁻¹ * x⁻¹
     x⁻¹, -x⁻²
 end
+@generated function ∂inv′(Lt::AbstractLowerTriangularMatrix{P,T,L}) where {P,L,T}
+# @generated function ∂inv(Lt::LowerTriangularMatrix{P,T,L}) where {P,T,L}
+    q = quote end
+    qa = q.args
+    load_packed_L_quote!(qa, P, :Lt, :Lt)
+    ∂inv_L_core_quote!(qa, P, :U, :Lt, T)
+    uq = store_packed_U_quote!(qa, P, :U, T, L)
+    Ladj = num_nonzero_in_∂inv(P)
+    quote
+        $(Expr(:meta,:inline))
+        @fastmath @inbounds begin
+            # begin
+            $q
+            $uq, TriangleInverseAdjoint{$P,$T,$Ladj}($(create_inv_tri_adj_tuple(P, :U, :Lt)))
+        end
+    end
+end
+@inline function ∂inv′(x)
+    x⁻¹ = inv(x)
+    x⁻² = x⁻¹ * x⁻¹
+    x⁻¹, -x⁻²
+end
 
 function partial_inv_quote(P,T,L = binomial2(P+1))
     q = quote end
