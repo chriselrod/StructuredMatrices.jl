@@ -143,6 +143,8 @@ end
 #
 # end
 
+@generated type_length(::AbstractDiagTriangularMatrix{P}) where {P} = binomial2(P+1)
+@generated param_type_length(::AbstractDiagTriangularMatrix{P}) where {P} = binomial2(P+1)
 
 Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
 
@@ -162,7 +164,7 @@ Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
 end
 
 
-@inline binomial2(n) = (n*(n-1)) >> 1
+
 # @inline binom2(n::Int) = (nu = reinterpret(UInt, n); reinterpret(Int, (nu*(nu-one(UInt))) >> one(UInt)))
 
 # function padded_diagonal_length(P, T)

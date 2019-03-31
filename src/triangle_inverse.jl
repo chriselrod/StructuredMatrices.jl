@@ -93,7 +93,7 @@ end
 # extract triangle_transpose
 
 @generated function Base.:*(
-        t::LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL,PL}},
+        t::Union{<: LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL,PL}},<: AbstractUpperTriangularMatrix{P,T} },
         adj::TriangleInverseAdjoint{P,T,L}
     ) where {P,T,L,M,PL}
 
