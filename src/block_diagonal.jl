@@ -4,16 +4,17 @@ abstract type AbstractBlockDiagonal{M,N,T} <: AbstractMatrix{T} end
 struct BlockDiagonalColumnView{M,N,T,P,L} <: AbstractBlockDiagonal{M,N,T}
     data::ConstantFixedSizePaddedMatrix{M,N,T,P,L}
 end
-function Base.getindex(bd::BlockDiagonalColumnView{M,N,T,P,L}) where {M,N,T,P,L}
-
-end
+# function Base.getindex(bd::BlockDiagonalColumnView{M,N,T,P,L}) where {M,N,T,P,L}
+#
+# end
 Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
+@inline VectorizationBase.vectorizable(A::BlockDiagonalColumnView) = VectorizationBase.vectorizable(A.data)
 
-@generated function Base.:*(BD::BlockDiagonalColumnView{M,N,T,P,L}, A::AbstractFixedSizePaddedMatrix{M,N,T,P,L}) where {M,N,T,P,L}
+@generated function Base.:*(A::AbstractFixedSizePaddedMatrix{M,N,T,P,L}, BD::BlockDiagonalColumnView{M,N,T,P,L}) where {M,N,T,P,L}
     q = quote
         c = MutableFixedSizePaddedVector{N,T}(undef)
         for n ∈ 0:$(N>>2-1)
-            Base.Cartesian.@nexprs 4 i -> s_i
+            Base.Cartesian.@nexprs 4 i -> s_i = zero($T)
             @vectorize $T for m ∈ 1:$P # Can we assume the padding is uncontaminated?
                 s_1 += A[m + $(4P)*n]       * BD[m + $(4P)*n]
                 s_2 += A[m + $(4P)*n+$P]    * BD[m + $(4P)*n+$P]

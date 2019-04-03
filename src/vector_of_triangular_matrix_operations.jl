@@ -53,42 +53,41 @@ end
 function triangle_vsum_quote(T::DataType,M::Int,L::Int,Lfull::Int)
     quote
         @inbounds for l ∈ 1:$L
-            out[l] = SIMDPirates.vsum(triangle[$l])
+            out[l] = SIMDPirates.vsum(triangle[l])
         end
         @inbounds for l ∈ $(L+1):$Lfull
             out[l] = zero($T)
         end
     end
 end
-@generated function SIMDPirates.vsum(triangle::AbstractLowerTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
-    Lfull = VectorizationBase.pick_vector_width(L, T)
+@generated function SIMDPirates.vsum(triangle::AbstractLowerTriangularMatrix{M,Vec{W,T},L}) where {T,W,M,L}
+    Wm1 = VectorizationBase.pick_vector_width(L, T) - 1
+    Lfull = (L + Wm1) & ~Wm1
     q = triangle_vsum_quote(T,M,L,Lfull)
     quote
         $(Expr(:meta,:inline))
-        out = $(Expr(:call, Expr(:curly, MutableLowerTriangularMatrix, M, T, Lfull), undef))
+        out = MutableLowerTriangularMatrix{$M,$T,$Lfull}(undef)
         $q
         out
     end
 end
-@generated function SIMDPirates.vsum(triangle::AbstractUpperTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
-    Lfull = VectorizationBase.pick_vector_width(L, T)
+@generated function SIMDPirates.vsum(triangle::AbstractUpperTriangularMatrix{M,Vec{W,T},L}) where {T,W,M,L}
+    Wm1 = VectorizationBase.pick_vector_width(L, T) - 1
+    Lfull = (L + Wm1) & ~Wm1
     q = triangle_vsum_quote(T,M,L,Lfull)
     quote
         $(Expr(:meta,:inline))
-        out = $(Expr(:call, Expr(:curly, MutableUpperTriangularMatrix, M, T, Lfull), undef))
+        out = MutableUpperTriangularMatrix{$M,$T,$Lfull}(undef)
         $q
         out
     end
 end
-@generated function vsumvec(triangle::AbstractDiagTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
-    quote
-        $(Expr(:meta,:inline))
-        @inbounds begin
-            $([:( $(Symbol(:t_,l)) = SIMDPirates.vsum(triangle[$l]) ) for l ∈ 1:L]...)
-        end
-        outtup = $(Expr(:tuple, [Symbol(:t_,l) for l ∈ 1:L]...))
-        $(Expr(:call, Expr(:curly, :(PaddedMatrices.ConstantFixedSizePaddedVector), M, T, L), outtup))
+@inline function vsumvec(triangle::AbstractDiagTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
+    out = MutableFixedSizePaddedVector{L,T}(undef)
+    @inbounds for l ∈ 1:L
+        out[l] = SIMDPirates.vsum(triangle[l])
     end
+    out
 end
 
 # function triangle_vsum_quote(T::DataType,M::Int,L::Int,Lfull::Int)
@@ -247,7 +246,16 @@ function matrix_upper_triangle_mul_quote(M::Int, N::Int, T::DataType, add::Bool 
     q
 end
 
-
+@generated function PaddedMatrices.zero!(U::AbstractDiagTriangularMatrix{M,NTuple{W,Core.VecElement{T}}}) where {M,W,T}
+    L = binomial2(M+1)
+    quote
+        $(Expr(:meta,:inline))
+        @inbounds for l ∈ 1:$L
+            U[l] = SIMDPirates.vbroadcast(Vec{$W,$T}, zero($T))
+        end
+        nothing
+    end
+end
 
 @generated function Base.:*(
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
@@ -284,6 +292,34 @@ end
     end
 end
 
+@generated function LinearAlgebra.mul!(
+            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
+        ) where {M,N,W,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        PaddedMatrices.zero!(AU)
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, true, 0))
+        end
+        AU
+    end
+end
+@generated function LinearAlgebra.mul!(
+            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            U::AbstractUpperTriangularMatrix{N,T,L}
+        ) where {M,N,W,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        PaddedMatrices.zero!(AU)
+        @inbounds begin
+            $(matrix_upper_triangle_mul_quote(M, N, T, true, W))
+        end
+        AU
+    end
+end
 @generated function addmul!(
             AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
@@ -387,7 +423,7 @@ function square_iterations_AUt_quote(kernel_size_m::Int, kernel_size_n::Int, min
         end
     end
 end
-function mkern_iteration_AUt_quote(kernel_size_m::Int, kernel_size_n::Int, nk::Int, nr::Int, mindexpr, add::DataType, W::Int, T::DataType)
+function mkern_iteration_AUt_quote(kernel_size_m::Int, kernel_size_n::Int, nk::Int, nr::Int, mindexpr, add::Bool, W::Int, T::DataType)
     if nr == 0
         nindexpr = :(nkern * $kernel_size_n)
         q = quote
@@ -482,7 +518,7 @@ end
 end
 @generated function Base.:*(
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,T,L}}
+            Ut::LinearAlgebra.Adjoint{T,<: AbstractUpperTriangularMatrix{N,T,L}}
         ) where {M,N,W,T,L}
     quote
         $(Expr(:meta,:inline))
@@ -514,7 +550,7 @@ end
 @generated function addmul!(
             AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,T,L}}
+            Ut::LinearAlgebra.Adjoint{T,<: AbstractUpperTriangularMatrix{N,T,L}}
         ) where {M,N,W,T,L}
     quote
         $(Expr(:meta,:inline))
@@ -541,8 +577,8 @@ end
 @generated function submul!(
             AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
-            Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,T,L}}
-        ) where {M,N,W,T,L}
+            Ut::LinearAlgebra.Adjoint{T,<: AbstractUpperTriangularMatrix{N,T,L}}
+        ) where {M,N,W,L,T}
     quote
         $(Expr(:meta,:inline))
         @inbounds begin
@@ -620,7 +656,7 @@ function mkernal_start_triangle_view_quote(kernel_size_m::Int, kernel_size_n::In
 
 
     push!(mkern_start.args, quote
-    println("tri_ind = $tri_ind; column: $(m_col + 2) ")
+    # println("tri_ind = $tri_ind; column: $(m_col + 2) ")
         U_1_3 = U[tri_ind-1]
         U_2_3 = U[tri_ind]
         U_3_3 = U[m_col+2]
@@ -642,7 +678,7 @@ function mkernal_start_triangle_view_quote(kernel_size_m::Int, kernel_size_n::In
     if kernel_size_m == 4
         push!(mkern_start.args, quote
             tri_increment += 1
-            println("tri_ind = $tri_ind; column: $(m_col +3) ")
+            # println("tri_ind = $tri_ind; column: $(m_col +3) ")
             U_1_4 = U[tri_ind-2]
             U_2_4 = U[tri_ind-1]
             U_3_4 = U[tri_ind]
@@ -687,10 +723,11 @@ function square_iterations_triangle_view_quote(kernel_size_m::Int, kernel_size_n
     quote
         for m_coliter in m_col+$kernel_size_m:$M
             Base.Cartesian.@nexprs $kernel_size_m m -> begin
-                println("tri_ind_col + m = $tri_ind_col + $m; column: $m_coliter")
+                # println("tri_ind_col + m = $tri_ind_col + $m; column: $m_coliter")
                 U_m = U[tri_ind_col + m]
             end
             Base.Cartesian.@nexprs $kernel_size_n n -> begin
+            # for n ∈ 1:$kernel_size_n
                 vB = B[n+$nindexpr,m_coliter]
                 Base.Cartesian.@nexprs $kernel_size_m m -> begin
                     U_m = SIMDPirates.$muladdfunc(A_m_n, vB, U_m)
@@ -741,6 +778,8 @@ function mul_mat_of_vecs_upper_triangle_view_quote(M::Int,N::Int,W::Int,T::DataT
     end
 
     q = quote
+        tri_ind = 0
+        tri_increment = 0
         tri_ind_base = $(M + 1)
         tri_increment_base = 2
         @inbounds for mkern in 0:$(mk-1)
@@ -782,7 +821,8 @@ end
             U::MutableUpperTriangularMatrix{M,NTuple{W,Core.VecElement{T}}},
             A::LinearAlgebra.Adjoint{Union{},<: AbstractFixedSizePaddedMatrix{N,M,NTuple{W,Core.VecElement{T}}}},
             B::AbstractFixedSizePaddedMatrix{N,M,NTuple{W,Core.VecElement{T}}}
-        ) where {M,N,W,T}
+        ) where {M,N,T,W}
+        # ) where {M,N,W,T}
 
     quote
         $(Expr(:meta,:inline))

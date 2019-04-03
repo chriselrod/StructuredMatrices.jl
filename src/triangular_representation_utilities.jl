@@ -13,6 +13,7 @@ mutable struct MutableLowerTriangularMatrix{P,T,L} <: AbstractLowerTriangularMat
     data::NTuple{L,T}
     MutableLowerTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+@inline LowerTriangularMatrix(M::MutableLowerTriangularMatrix{P,T,L}) where {P,T,L} = LowerTriangularMatrix{P,T,L}(M.data)
 struct UpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMatrix{P,T,L}
     data::NTuple{L,T}
 end
@@ -20,6 +21,7 @@ mutable struct MutableUpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMat
     data::NTuple{L,T}
     MutableUpperTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+@inline UpperTriangularMatrix(M::MutableUpperTriangularMatrix{P,T,L}) where {P,T,L} = UpperTriangularMatrix{P,T,L}(M.data)
 @generated function MutableLowerTriangularMatrix{P,T}(undef) where {P,T}
     Lbase = binomial2(P+1)
     W = VectorizationBase.pick_vector_width(Lbase,T)
@@ -53,6 +55,23 @@ mutable struct MutableSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L}
     data::NTuple{L,T}
     MutableSymmetricMatrixL{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+# @generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{P,P,T,R}) where {P,T,R}
+#     q = quote end
+#     qa = q.args
+#     PaddedMatrices.load_L_quote!(qa, P, R, :Σ, :Σ)
+#     L = binomial2(P+1)
+#     Wm1 = VectorizationBase.pick_vector_width(L, T)-1
+#     L = (L + Wm1) & ~Wm1
+#     lq = store_packed_L_quote!(qa, P, :Σ, T, L)
+#     quote
+#         # $(Expr(:meta,:inline))
+#         @inbounds begin
+#             # begin
+#             $q
+#             $lq
+#         end
+#     end
+# end
 
 struct SymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L}
     data::NTuple{L,T}
@@ -93,6 +112,10 @@ const AbstractMutableDiagMatrix{P,T,L} = Union{
     @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
     @inbounds A.data[i]
 end
+@inline function Base.getindex(A::LinearAlgebra.Adjoint{T,<:AbstractDiagTriangularMatrix{P,T,L}}, i::Integer) where {P,T,L}
+    @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
+    @inbounds A.parent.data[i]
+end
 @inline function Base.getindex(A::LinearAlgebra.Adjoint{Union{},<:AbstractDiagTriangularMatrix{P,Vec{W,T},L}}, i::Integer) where {P,T,L,W}
     @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
     @inbounds A.parent.data[i]
@@ -103,6 +126,22 @@ const MutableDiagTriangle{P,T,L} = Union{MutableLowerTriangularMatrix{P,T,L},Mut
 @inline Base.pointer(A::MutableDiagTriangle{P,T,L}) where {P,T,L} = Base.unsafe_convert(Ptr{T}, pointer_from_objref(A))
 @inline function Base.pointer(A::MutableDiagTriangle{P,NTuple{W,Core.VecElement{T}},L}) where {P,T,L,W}
     Base.unsafe_convert(Ptr{T}, pointer_from_objref(A))
+end
+@inline function Base.getindex(A::AbstractMutableDiagMatrix{P,T,L}, i::Integer) where {P,T,L}
+    @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
+    VectorizationBase.load(pointer(A) + sizeof(T) * (i-1))
+end
+@inline function Base.getindex(A::LinearAlgebra.Adjoint{T,<:AbstractMutableDiagMatrix{P,T,L}}, i::Integer) where {P,T,L}
+    @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
+    VectorizationBase.load(pointer(A.parent) + sizeof(T) * (i-1))
+end
+@inline function Base.getindex(A::AbstractMutableDiagMatrix{P,Vec{W,T},L}, i::Integer) where {P,W,T,L}
+    @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
+    SIMDPirates.vload(Vec{W,T}, pointer(A) + W*sizeof(T)*(i-1))
+end
+@inline function Base.getindex(A::LinearAlgebra.Adjoint{Union{},<:AbstractMutableDiagMatrix{P,Vec{W,T},L}}, i::Integer) where {P,W,T,L}
+    @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
+    SIMDPirates.vload(Vec{W,T}, pointer(A.parent) + W*sizeof(T)*(i-1))
 end
 
 
@@ -277,6 +316,28 @@ function ut_sub2ind(P, i, j)
     i == j && return i
     i, j = minmax(i, j)
     1 + P + binomial2(j) + i - j
+end
+
+
+@generated function Base.:+(A::AbstractLowerTriangularMatrix{M,T,L}, B::AbstractLowerTriangularMatrix{M,T,L}) where {M,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        C = MutableLowerTriangularMatrix{$M,$T,$L}(undef)
+        @vectorize $T for l ∈ 1:$L
+            C[l] = A[l] + B[l]
+        end
+        C
+    end
+end
+@generated function Base.:+(A::AbstractUpperTriangularMatrix{M,T,L}, B::AbstractUpperTriangularMatrix{M,T,L}) where {M,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        C = MutableUpperTriangularMatrix{$M,$T,$L}(undef)
+        @vectorize $T for l ∈ 1:$L
+            C[l] = A[l] + B[l]
+        end
+        C
+    end
 end
 
 

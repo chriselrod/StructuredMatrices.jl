@@ -58,7 +58,7 @@ end
     uq = store_packed_U_quote!(qa, P, :U, T, L)
     Ladj = num_nonzero_in_∂inv(P)
     quote
-        $(Expr(:meta,:inline))
+        # $(Expr(:meta,:inline))
         @fastmath @inbounds begin
             # begin
             $q
@@ -92,10 +92,7 @@ end
 
 # extract triangle_transpose
 
-@generated function Base.:*(
-        t::Union{<: LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL,PL}},<: AbstractUpperTriangularMatrix{P,T} },
-        adj::TriangleInverseAdjoint{P,T,L}
-    ) where {P,T,L,M,PL}
+function triangle_adjoint_quote(P,T,L,PL)
 
     # How to order elements: first P ∂diags
     q = quote end
@@ -141,13 +138,39 @@ end
     end
 
     quote
+        $loadq
+        $q
+    end, storeq
+end
+
+
+@generated function Base.:*(
+            t::LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL,PL}},
+            adj::TriangleInverseAdjoint{P,T,L}
+        ) where {P,T,L,M,PL}
+    outsize = binomial2(P+1)
+    q, storeq = triangle_adjoint_quote(P,T,L,PL)
+    quote
         @fastmath @inbounds begin
-            $loadq
             $q
             ConstantFixedSizePaddedVector{$outsize,$T}($storeq)'
         end
     end
-
+end
+@generated function Base.:*(
+            t::AbstractUpperTriangularMatrix{P,T},
+            adj::TriangleInverseAdjoint{P,T,L}
+        ) where {P,T,L}
+    M = binomial2(P+1)
+    Wm1 = VectorizationBase.pick_vector_width(M,T) - 1
+    PL = (M + Wm1) & ~Wm1
+    q, storeq = triangle_adjoint_quote(P,T,L,PL)
+    quote
+        @fastmath @inbounds begin
+            $q
+            LowerTriangularMatrix{$P,$T,$PL}($storeq)
+        end
+    end
 end
 
 function load_inv_tri_adj!(qa, P, adjsym = :triangle_adjoint)
