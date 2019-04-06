@@ -44,8 +44,9 @@ but should be more numerically accurate.
 det(A) is at high risk of over/underflow
 for large matrices.
 """
-@generated function LinearAlgebra.logdet(A::AbstractTriangularMatrix{P,T,L}) where {P,T,L}
+@generated function LinearAlgebra.logdet(A::AbstractTriangularMatrix{P,T,L}) where {P,L,T}
     quote
+        $(Expr(:meta,:inline))
         out = zero(T)
         @vectorize $T for i ∈ 1:$P
             out += log(A[i])

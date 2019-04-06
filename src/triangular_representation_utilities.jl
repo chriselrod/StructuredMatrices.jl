@@ -43,6 +43,41 @@ end
     end
 end
 
+function copyto!(L::MutableLowerTriangularMatrix{M,T}, A::Matrix) where {M,T}
+    for m ∈ 1:M
+        L[m] = A[m,m]
+    end
+    for mc ∈ 1:M-1
+        for mr ∈ mc+1:M
+            L[mr,mc] = A[mr,mc]
+        end
+    end
+end
+function MutableLowerTriangularMatrix(A::Matrix{T}) where {T}
+    M, N = size(A)
+    @assert M == N
+    L = MutableLowerTriangularMatrix{M,T}(undef)
+    copyto!(L, A)
+    L
+end
+
+function copyto!(L::MutableUpperTriangularMatrix{M,T}, A::Matrix) where {M,T}
+    for m ∈ 1:M
+        L[m] = A[m,m]
+    end
+    for mc ∈ 2:M
+        for mr ∈ 1:mc-1
+            L[mr,mc] = A[mr,mc]
+        end
+    end
+end
+function MutableUpperTriangularMatrix(A::Matrix{T}) where {T}
+    M, N = size(A)
+    @assert M == N
+    L = MutableUpperTriangularMatrix{M,T}(undef)
+    copyto!(L, A)
+    L
+end
 
 abstract type AbstractSymmetricMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
 abstract type AbstractSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
@@ -153,6 +188,31 @@ end
 @inline function Base.setindex!(A::MutableDiagTriangle{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer) where {P,T,L,W}
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (i-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
+    v
+end
+
+@inline function Base.setindex!(A::MutableLowerTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
+    ind = lt_sub2ind(P, i, j)
+    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
+    v
+end
+@inline function Base.setindex!(A::MutableLowerTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
+    ind = lt_sub2ind(P, i, j)
+    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
+    v
+end
+@inline function Base.setindex!(A::MutableUpperTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
+    ind = lt_sub2ind(P, i, j)
+    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
+    v
+end
+@inline function Base.setindex!(A::MutableUpperTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
+    ind = lt_sub2ind(P, i, j)
+    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
     v
 end
 
@@ -337,6 +397,16 @@ end
             C[l] = A[l] + B[l]
         end
         C
+    end
+end
+@generated function Base.:+(A::UpperTriangularMatrix{M,T,L}, B::UpperTriangularMatrix{M,T,L}) where {M,T,L}
+    quote
+        $(Expr(:meta,:inline))
+        C = MutableUpperTriangularMatrix{$M,$T,$L}(undef)
+        @vectorize $T for l ∈ 1:$L
+            C[l] = A[l] + B[l]
+        end
+        UpperTriangularMatrix(C)
     end
 end
 
