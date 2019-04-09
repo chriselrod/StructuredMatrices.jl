@@ -111,12 +111,27 @@ cache(A::AbstractAutoregressiveMatrix) = A
         invOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
         rinvOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
         # nρᵗrinvOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
-        @vectorize $T for i ∈ 1:$M
-            ρᵗ[i] = SIMDPirates.vcopysign(SIMDPirates.vpow(SIMDPirates.vabs(ρ),  τ[i] ), ρ)
-            vinvOmρ²ᵗ = 1 / (1 - ρᵗ[i]*ρᵗ[i])
-            invOmρ²ᵗ[i] = vinvOmρ²ᵗ
-            rinvOmρ²ᵗ[i] = sqrt(vinvOmρ²ᵗ)
-            # nρᵗrinvOmρ²ᵗ[i] = -ρᵗ[i] * rinvOmρ²ᵗ[i]
+        if ρ != 0
+            absρ = abs(ρ)
+            @vectorize $T for i ∈ 1:$L
+                ρᵗ[i] = SIMDPirates.vcopysign(SIMDPirates.vpow(absρ,  τ[i]), ρ)
+                vinvOmρ²ᵗ = 1 / (1 - ρᵗ[i]*ρᵗ[i])
+                invOmρ²ᵗ[i] = vinvOmρ²ᵗ
+                rinvOmρ²ᵗ[i] = sqrt(vinvOmρ²ᵗ)
+                # nρᵗrinvOmρ²ᵗ[i] = -ρᵗ[i] * rinvOmρ²ᵗ[i]
+            end
+        # elseif ρ < 0
+        #     @vectorize $T for i ∈ 1:$M
+        #         ρᵗ[i] = SIMDPirates.vcopysign(SIMDPirates.vpow(SIMDPirates.vabs(ρ),  τ[i] ), ρ)
+        #         vinvOmρ²ᵗ = 1 / (1 - ρᵗ[i]*ρᵗ[i])
+        #         invOmρ²ᵗ[i] = vinvOmρ²ᵗ
+        #         rinvOmρ²ᵗ[i] = sqrt(vinvOmρ²ᵗ)
+        #         # nρᵗrinvOmρ²ᵗ[i] = -ρᵗ[i] * rinvOmρ²ᵗ[i]
+        #     end
+        else # ρ == 0
+            fill!(ρᵗ, zero(T))
+            fill!(invOmρ²ᵗ, one(T))
+            fill!(rinvOmρ²ᵗ, one(T))
         end
         AutoregressiveMatrixLowerCholeskyInverse(
             ρ, τ, CachedUnevenSpacing(
@@ -301,23 +316,13 @@ function LinearAlgebra.logdet(A::AbstractAutoregressiveMatrix{T,R,S}) where {T,R
     (length(A.τ) - 1) * log(A.spacing.rinvOmρ²ᵗ)
 end
 
-function ∂det(A::AbstractAutoregressiveMatrix{T,R,S}) where {T,R <: AbstractUnitRange,S <: EvenSpacing}
-    N = length(A.τ) - 1
-    d = A.spacing.rinvOmρ²ᵗ^N
-    d, A.ρ * N * d * A.spacing.invOmρ²ᵗ
-end
 function ∂logdet(A::AbstractAutoregressiveMatrix{T,R,S}) where {T,R <: AbstractUnitRange,S <: EvenSpacing}
     N = (length(A.τ) - 1)
-    N * log(A.spacing.rinvOmρ²ᵗ), N * A.ρ * A.spacing.invOmρ²ᵗ
-end
-function ∂det(A::AbstractAutoregressiveMatrix{T,R,S}) where {T,R <: AbstractRange,S <: EvenSpacing}
-    N = length(A.τ) - 1
-    d = A.spacing.rinvOmρ²ᵗ^N
-    d, step(A.τ) * A.ρ^(2step(A.τ) - 1) * N * d * A.spacing.invOmρ²ᵗ
+    N * log(A.spacing.rinvOmρ²ᵗ), N * A.τ * A.ρ * A.spacing.invOmρ²ᵗ[i]
 end
 function ∂logdet(A::AbstractAutoregressiveMatrix{T,R,S}) where {T,R <: AbstractRange,S <: EvenSpacing}
     N = (length(A.τ) - 1)
-    N * log(A.spacing.rinvOmρ²ᵗ),  - 2N*step(A.τ) * A.ρ^(2step(A.τ) - 1) * A.spacing.invOmρ²ᵗ
+    N * log(A.spacing.rinvOmρ²ᵗ), N * A.τ * A.spacing.ρᵗ * A.spacing.ρᵗ * A.spacing.invOmρ²ᵗ / A.ρ
 end
 
 @generated function LinearAlgebra.logdet(A::AbstractAutoregressiveMatrix{T,R,S}) where {T,R<:AbstractVector,S <: CachedUnevenSpacing}
@@ -335,12 +340,30 @@ end
         out = zero(T)
         ∂out = zero(T)
         rinvOmρ²ᵗ = A.spacing.rinvOmρ²ᵗ
-        @vectorize $T for i ∈ eachindex(A.τ)
+        invOmρ²ᵗ = A.spacing.invOmρ²ᵗ
+        ρᵗ = A.spacing.ρᵗ
+        ρ = A.ρ
+        τ = A.τ
+        # if ρ != 0
+        @vectorize $T for i ∈ eachindex(τ)
             out += log(rinvOmρ²ᵗ[i])
-            ∂out += 1 / rinvOmρ²ᵗ[i]
+            ∂out += τ[i] * ρᵗ[i] * ρᵗ[i] * invOmρ²ᵗ[i] / ρ
         end
-        out, ∂out
+        return out, ∂out
+        # else
+        #     @vectorize $T for i ∈ eachindex(τ)
+        #         ∂out += τ[i] * ρᵗ[i] * SIMDPirates.vabs(ρ[i-1] * invOmρ²ᵗ[i] / ρ
+        #     end
+        #     return out, ∂out
+        # end
+        return out, ∂out
     end
+end
+function ∂det(A::AbstractAutoregressiveMatrix)
+    logdetA, ∂logdetA = ∂logdet(A)
+    detA = exp(logdetA)
+    ∂detA = ∂logdetA * detA
+    detA, ∂detA
 end
 
 
