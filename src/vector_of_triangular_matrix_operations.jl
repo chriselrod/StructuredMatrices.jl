@@ -796,7 +796,7 @@ function mul_mat_of_vecs_upper_triangle_view_quote(M::Int,N::Int,W::Int,T::DataT
                     for nkern in 0:$(nk-1)
                         $(mkernal_start_triangle_view_quote(mr, kernel_size_n, mindexpr_complete, nindexpr,add))
                     end
-                    $(mkernal_start_triangle_view_quote(mr, kernel_size_n, mindexpr_complete, nindexpr_complete,add))
+                    $(nr == 0 ? nothing : mkernal_start_triangle_view_quote(mr, kernel_size_n, mindexpr_complete, nindexpr_complete,add))
                 end
             end
         )
