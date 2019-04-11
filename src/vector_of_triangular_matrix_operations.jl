@@ -847,3 +847,13 @@ end
         $(mul_mat_of_vecs_upper_triangle_view_quote(M,N,W,T,true))
     end
 end
+
+function all_finite(U::MutableUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}) where {N,W,T,L}
+    @inbounds begin
+        reduction = SIMDPirates.visfinite(U[1])
+        for l ∈ 2:L
+            reduction = SIMDPirates.vand(reduction, SIMDPirates.visfinite(U[l]))
+        end
+    end
+    SIMDPirates.vall(reduction)
+end
