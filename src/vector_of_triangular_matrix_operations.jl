@@ -848,7 +848,7 @@ end
     end
 end
 
-function all_finite(U::MutableUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}) where {N,W,T,L}
+function all_finite(U::AbstractDiagTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}) where {N,W,T,L}
     @inbounds begin
         reduction = SIMDPirates.visfinite(U[1])
         for l ∈ 2:L
