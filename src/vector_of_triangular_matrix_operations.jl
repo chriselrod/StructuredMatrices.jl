@@ -857,3 +857,14 @@ function all_finite(U::AbstractDiagTriangularMatrix{N,NTuple{W,Core.VecElement{T
     end
     SIMDPirates.vall(reduction)
 end
+
+function PaddedMatrices.zero!(A::AbstractDiagTriangularMatrix{N,T,L}) where {N,T,L}
+    @inbounds for i ∈ 1:L
+        A[i] = zero(T)
+    end
+end
+# function PaddedMatrices.zero!(A::AbstractDiagTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}) where {N,W,T,L}
+#     @inbounds for i ∈ 1:L
+#         A[i] = SIMDPirates.vbroadcast(NTuple{W,Core.VecElement{T}}, zero(T))
+#     end
+# end

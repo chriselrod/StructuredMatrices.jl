@@ -370,8 +370,8 @@ end
 @generated function quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
             B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
-        # ) where {T,R,M,N,W,S,VoT}
-        ) where {T,R,M,N,W,VoT,S}
+        # ) where {T,R,M,N,W,S}
+        ) where {T,R,M,N,W,S}
     V = NTuple{W,Core.VecElement{T}}
     # broadcastB = VoT == T
     q = quote
@@ -758,8 +758,8 @@ end
 @generated function ∂quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
             B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
-        # ) where {T,R,M,N,W,S,VoT}
-        ) where {T,R,M,N,W,VoT,S}
+        # ) where {T,R,M,N,W,S}
+        ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
@@ -874,8 +874,8 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 @generated function selfcrossmul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
             B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
-        # ) where {T,R,M,N,W,VoT,S}
-        ) where {T,R,M,N,W,S,VoT}
+        # ) where {T,R,M,N,W,S}
+        ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
@@ -888,8 +888,8 @@ end
             product::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractAutoregressiveMatrix{T,R,S},
             B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
-        # ) where {T,R,M,N,W,S,VoT}
-        ) where {T,R,M,N,W,VoT,S}
+        # ) where {T,R,M,N,W,S}
+        ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
@@ -1003,8 +1003,8 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 @generated function ∂selfcrossmul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
             B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
-        # ) where {T,R,M,N,W,VoT,S}
-        ) where {T,R,M,N,W,S,VoT}
+        # ) where {T,R,M,N,W,S}
+        ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
@@ -1017,8 +1017,8 @@ end
             product::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractAutoregressiveMatrix{T,R,S},
             B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
-        # ) where {T,R,M,N,W,S,VoT}
-        ) where {T,R,M,N,W,VoT,S}
+        # ) where {T,R,M,N,W,S}
+        ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
@@ -1029,7 +1029,6 @@ end
 
 function ∂selfcrossmuldiff_and_quadform_quote(M,N,W,T,R,S)
     V = NTuple{W,Core.VecElement{T}}
-    # broadcastB = VoT == T
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
