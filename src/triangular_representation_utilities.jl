@@ -5,11 +5,13 @@ abstract type AbstractDiagTriangularMatrix{P,T,L} <: AbstractMatrix{T} end
 abstract type AbstractTriangularMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
 abstract type AbstractLowerTriangularMatrix{P,T,L} <: AbstractTriangularMatrix{P,T,L} end
 abstract type AbstractUpperTriangularMatrix{P,T,L} <: AbstractTriangularMatrix{P,T,L} end
+abstract type AbstractMutableLowerTriangularMatrix{P,T,L} <: AbstractLowerTriangularMatrix{P,T,L} end
+abstract type AbstractMutableUpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMatrix{P,T,L} end
 
 struct LowerTriangularMatrix{P,T,L} <: AbstractLowerTriangularMatrix{P,T,L}
     data::NTuple{L,T}
 end
-mutable struct MutableLowerTriangularMatrix{P,T,L} <: AbstractLowerTriangularMatrix{P,T,L}
+mutable struct MutableLowerTriangularMatrix{P,T,L} <: AbstractMutableLowerTriangularMatrix{P,T,L}
     data::NTuple{L,T}
     MutableLowerTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
@@ -17,10 +19,18 @@ end
 struct UpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMatrix{P,T,L}
     data::NTuple{L,T}
 end
-mutable struct MutableUpperTriangularMatrix{P,T,L} <: AbstractUpperTriangularMatrix{P,T,L}
+mutable struct MutableUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P,T,L}
     data::NTuple{L,T}
     MutableUpperTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+struct PtrLowerTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P,T,L}
+    ptr::Ptr{T}
+end
+struct PtrUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P,T,L}
+    ptr::Ptr{T}
+end
+
+
 @inline UpperTriangularMatrix(M::MutableUpperTriangularMatrix{P,T,L}) where {P,T,L} = UpperTriangularMatrix{P,T,L}(M.data)
 @generated function MutableLowerTriangularMatrix{P,T}(undef) where {P,T}
     Lbase = binomial2(P+1)
@@ -82,13 +92,18 @@ end
 abstract type AbstractSymmetricMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
 abstract type AbstractSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
 abstract type AbstractSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
+abstract type AbstractMutableSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
+abstract type AbstractMutableSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
 
 struct SymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L}
     data::NTuple{L,T}
 end
-mutable struct MutableSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L}
+mutable struct MutableSymmetricMatrixL{P,T,L} <: AbstractMutableSymmetricMatrixL{P,T,L}
     data::NTuple{L,T}
     MutableSymmetricMatrixL{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
+end
+struct PtrSymmetricMatrixL{P,T,L} <: AbstractMutableSymmetricMatrixL{P,T,L}
+    ptr::Ptr{T}
 end
 # @generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{P,P,T,R}) where {P,T,R}
 #     q = quote end
@@ -111,7 +126,10 @@ end
 struct SymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L}
     data::NTuple{L,T}
 end
-mutable struct MutableSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L}
+struct PtrSymmetricMatrixU{P,T,L} <: AbstractMutableSymmetricMatrixU{P,T,L}
+    ptr::Ptr{T}
+end
+mutable struct MutableSymmetricMatrixU{P,T,L} <: AbstractMutableSymmetricMatrixU{P,T,L}
     data::NTuple{L,T}
     MutableSymmetricMatrixU{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
@@ -140,7 +158,11 @@ const AbstractMutableDiagMatrix{P,T,L} = Union{
     MutableLowerTriangularMatrix{P,T,L},
     MutableUpperTriangularMatrix{P,T,L},
     MutableSymmetricMatrixL{P,T,L},
-    MutableSymmetricMatrixU{P,T,L}
+    MutableSymmetricMatrixU{P,T,L},
+    PtrLowerTriangularMatrix{P,T,L},
+    PtrUpperTriangularMatrix{P,T,L},
+    PtrSymmetricMatrixL{P,T,L},
+    PtrSymmetricMatrixU{P,T,L}
 }
 
 @inline function Base.getindex(A::AbstractDiagTriangularMatrix{P,T,L}, i::Integer) where {P,T,L}
@@ -156,12 +178,22 @@ end
     @inbounds A.parent.data[i]
 end
 
-const MutableDiagTriangle{P,T,L} = Union{MutableLowerTriangularMatrix{P,T,L},MutableUpperTriangularMatrix{P,T,L},MutableSymmetricMatrixL{P,T,L},MutableSymmetricMatrixU{P,T,L}}
+const MutableDiagTriangle{P,T,L} = Union{
+    MutableLowerTriangularMatrix{P,T,L},
+    MutableUpperTriangularMatrix{P,T,L},
+    MutableSymmetricMatrixL{P,T,L},
+    MutableSymmetricMatrixU{P,T,L}
+}
 
 @inline Base.pointer(A::MutableDiagTriangle{P,T,L}) where {P,T,L} = Base.unsafe_convert(Ptr{T}, pointer_from_objref(A))
 @inline function Base.pointer(A::MutableDiagTriangle{P,NTuple{W,Core.VecElement{T}},L}) where {P,T,L,W}
     Base.unsafe_convert(Ptr{T}, pointer_from_objref(A))
 end
+@inline Base.pointer(A::PtrLowerTriangularMatrix) = A.ptr
+@inline Base.pointer(A::PtrUpperTriangularMatrix) = A.ptr
+@inline Base.pointer(A::PtrSymmetricMatrixL) = A.ptr
+@inline Base.pointer(A::PtrSymmetricMatrixU) = A.ptr
+
 @inline function Base.getindex(A::AbstractMutableDiagMatrix{P,T,L}, i::Integer) where {P,T,L}
     @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
     VectorizationBase.load(pointer(A) + sizeof(T) * (i-1))
@@ -180,36 +212,36 @@ end
 end
 
 
-@inline function Base.setindex!(A::MutableDiagTriangle{P,T,L}, v, i::Integer) where {P,T,L}
+@inline function Base.setindex!(A::AbstractMutableDiagMatrix{P,T,L}, v, i::Integer) where {P,T,L}
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     VectorizationBase.store!(pointer(A) + (i-1) * sizeof(T), convert(T,v))
     v
 end
-@inline function Base.setindex!(A::MutableDiagTriangle{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer) where {P,T,L,W}
+@inline function Base.setindex!(A::AbstractMutableDiagMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer) where {P,T,L,W}
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (i-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
     v
 end
 
-@inline function Base.setindex!(A::MutableLowerTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
+@inline function Base.setindex!(A::AbstractMutableLowerTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
     ind = lt_sub2ind(P, i, j)
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
     v
 end
-@inline function Base.setindex!(A::MutableLowerTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
+@inline function Base.setindex!(A::AbstractMutableLowerTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
     ind = lt_sub2ind(P, i, j)
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
     v
 end
-@inline function Base.setindex!(A::MutableUpperTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
+@inline function Base.setindex!(A::AbstractMutableUpperTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
     ind = lt_sub2ind(P, i, j)
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
     v
 end
-@inline function Base.setindex!(A::MutableUpperTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
+@inline function Base.setindex!(A::AbstractMutableUpperTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
     ind = lt_sub2ind(P, i, j)
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
@@ -247,21 +279,8 @@ end
 
 Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
 
-
-@generated function VectorizationBase.vectorizable(A::M) where {T, P, M <: AbstractDiagTriangularMatrix{P,T}}
-    if M.mutable
-        return quote
-            :(Expr(:meta, :inline))
-            VectorizationBase.vpointer(Base.unsafe_convert(Ptr{$T}, pointer_from_objref(A)))
-        end
-    else
-        return quote
-            :(Expr(:meta, :inline))
-            PaddedMatrices.vStaticPaddedArray(A, 0)
-        end
-    end
-end
-
+@inline VectorizationBase.vectorizable(A::AbstractMutableDiagMatrix) = VectorizationBase.vpointer(pointer(A))
+@inline VectorizationBase.vectorizable(A::AbstractDiagTriangularMatrix) = PaddedMatrices.vStaticPaddedArray(A, 0)
 
 
 # @inline binom2(n::Int) = (nu = reinterpret(UInt, n); reinterpret(Int, (nu*(nu-one(UInt))) >> one(UInt)))
