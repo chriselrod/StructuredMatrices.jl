@@ -293,7 +293,7 @@ end
 end
 
 @generated function LinearAlgebra.mul!(
-            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AU::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
         ) where {M,N,W,T,L}
@@ -307,7 +307,7 @@ end
     end
 end
 @generated function LinearAlgebra.mul!(
-            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AU::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,T,L}
         ) where {M,N,W,T,L}
@@ -321,7 +321,7 @@ end
     end
 end
 @generated function addmul!(
-            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AU::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
         ) where {M,N,W,T,L}
@@ -334,7 +334,7 @@ end
     end
 end
 @generated function addmul!(
-            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AU::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,T,L}
         ) where {M,N,W,T,L}
@@ -348,7 +348,7 @@ end
 end
 
 @generated function submul!(
-            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AU::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}
         ) where {M,N,W,T,L}
@@ -362,7 +362,7 @@ end
     end
 end
 @generated function submul!(
-            AU::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AU::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             U::AbstractUpperTriangularMatrix{N,T,L}
         ) where {M,N,W,T,L}
@@ -535,7 +535,7 @@ end
 end
 
 @generated function addmul!(
-            AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AUt::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
         ) where {M,N,W,T,L}
@@ -548,7 +548,7 @@ end
     end
 end
 @generated function addmul!(
-            AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AUt::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             Ut::LinearAlgebra.Adjoint{T,<: AbstractUpperTriangularMatrix{N,T,L}}
         ) where {M,N,W,T,L}
@@ -562,7 +562,7 @@ end
 end
 
 @generated function submul!(
-            AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AUt::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             Ut::LinearAlgebra.Adjoint{Union{},<: AbstractUpperTriangularMatrix{N,NTuple{W,Core.VecElement{T}},L}}
         ) where {M,N,W,T,L}
@@ -575,7 +575,7 @@ end
     end
 end
 @generated function submul!(
-            AUt::MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            AUt::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             Ut::LinearAlgebra.Adjoint{T,<: AbstractUpperTriangularMatrix{N,T,L}}
         ) where {M,N,W,L,T}

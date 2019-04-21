@@ -34,8 +34,7 @@ end
 @inline UpperTriangularMatrix(M::MutableUpperTriangularMatrix{P,T,L}) where {P,T,L} = UpperTriangularMatrix{P,T,L}(M.data)
 @generated function MutableLowerTriangularMatrix{P,T}(undef) where {P,T}
     Lbase = binomial2(P+1)
-    W = VectorizationBase.pick_vector_width(Lbase,T)
-    Wm1 = W - 1
+    Wm1 = VectorizationBase.pick_vector_width(Lbase,T) - 1
     L = (Lbase + Wm1) & ~Wm1
     quote
         $(Expr(:meta,:inline))
@@ -44,8 +43,7 @@ end
 end
 @generated function MutableUpperTriangularMatrix{P,T}(undef) where {P,T}
     Lbase = binomial2(P+1)
-    W = VectorizationBase.pick_vector_width(Lbase,T)
-    Wm1 = W - 1
+    Wm1 = VectorizationBase.pick_vector_width(Lbase,T) - 1
     L = (Lbase + Wm1) & ~Wm1
     quote
         $(Expr(:meta,:inline))
