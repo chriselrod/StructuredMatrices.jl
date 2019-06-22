@@ -30,6 +30,21 @@ struct PtrUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P
     ptr::Ptr{T}
 end
 
+@generated function PtrLowerTriangularMatrix{P,T}(sp::PaddedMatrices.StackPointer) where {P,T}
+    L = binomial2(P+1)
+    quote
+        A = PtrLowerTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
+        sp + $(L*sizeof(T)), A
+    end
+end
+@generated function PtrUpperTriangularMatrix{P,T}(sp::PaddedMatrices.StackPointer) where {P,T}
+    L = binomial2(P+1)
+    quote
+        A = PtrUpperTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
+        sp + $(L*sizeof(T)), A
+    end
+end
+
 
 @inline UpperTriangularMatrix(M::MutableUpperTriangularMatrix{P,T,L}) where {P,T,L} = UpperTriangularMatrix{P,T,L}(M.data)
 @generated function MutableLowerTriangularMatrix{P,T}(undef) where {P,T}
