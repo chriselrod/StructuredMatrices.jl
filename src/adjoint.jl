@@ -41,7 +41,10 @@ end
 end
 
 
-@generated function RESERVED_INCREMENT_SEED_RESERVED(D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}}, A::AbstractMutableDiagMatrix{M,T}) where {M,T}
+@generated function RESERVED_INCREMENT_SEED_RESERVED(
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}},
+    A::AbstractMutableDiagMatrix{M,T}
+) where {M,T}
     quote
         $(Expr(:meta,:inline))
         @vectorize for m ∈ 1:$M
@@ -50,3 +53,76 @@ end
         A
     end
 end
+
+@inline function RESERVED_INCREMENT_SEED_RESERVED(
+    sp::StackPointer,
+    seedin::AbstractLowerTriangularMatrix,
+    jac::∂DiagLowerTri∂Diag,
+    seedout::AbstractFixedSizePaddedVector
+)
+#    @show seedin
+#    @show jac.data
+#    @show seedout
+    sp, a = row_sum_prod_add(sp, seedin, jac.data, seedout)
+#    @show a'
+    sp, a'
+end
+@inline function RESERVED_MULTIPLY_SEED_RESERVED(
+    sp::StackPointer,
+    seedin::AbstractLowerTriangularMatrix,
+    jac::∂DiagLowerTri∂Diag
+)
+#    @show seedin
+#    @show jac.data
+    sp, a = row_sum_prod(sp, seedin, jac.data)
+#    @show a'
+    sp, a'
+end
+@inline function RESERVED_INCREMENT_SEED_RESERVED(
+    sp::StackPointer,
+    seedin::AbstractLowerTriangularMatrix,
+    jac::∂DiagLowerTri∂LowerTri,
+    seedout::AbstractFixedSizePaddedVector
+)
+#    @show seedin
+#    @show jac.data
+    muladd(sp, jac.data, seedin, seedout)
+#    @show a
+#    sp, a
+end
+@inline function RESERVED_MULTIPLY_SEED_RESERVED(
+    sp::StackPointer,
+    seedin::AbstractLowerTriangularMatrix,
+    jac::∂DiagLowerTri∂LowerTri
+)
+    *(sp, jac.data, seedin)
+end
+
+
+#=@generated function RESERVED_INCREMENT_SEED_RESERVED(
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}},
+    A::AbstractMutableDiagMatrix{M,T}
+) where {M,T}
+    quote
+        $(Expr(:meta,:inline))
+        @vectorize for m ∈ 1:$M
+            A[m] = D[m] + A[m]
+        end
+        A
+    end
+end=#
+@generated function RESERVED_INCREMENT_SEED_RESERVED(
+    sp::StackPointer,
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}},
+    A::AbstractMutableDiagMatrix{M,T}
+) where {M,T}
+    quote
+        $(Expr(:meta,:inline))
+        @vectorize for m ∈ 1:$M
+            A[m] = D[m] + A[m]
+        end
+        (sp, A)
+    end
+end
+
+

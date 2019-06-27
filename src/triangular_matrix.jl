@@ -6,10 +6,21 @@
     @inbounds S.data[lt_sub2ind(P, i, j)]
 end
 
+@inline function Base.getindex(S::AbstractMutableLowerTriangularMatrix{P,T,L}, i, j) where {P,T,L}
+    @boundscheck i > P && ThrowBoundsError("i == $i > $P")
+    j > i && return zero(T)
+    VectorizationBase.load(pointer(S) + (lt_sub2ind(P, i, j) - 1)*sizeof(T))
+end
+
 @inline function Base.getindex(S::AbstractUpperTriangularMatrix{P,T,L}, i, j) where {P,T,L}
     i > j && return zero(T)
     @boundscheck j > P && ThrowBoundsError("j == $j > $P.")
     @inbounds S.data[ut_sub2ind(P, i, j)]
+end
+@inline function Base.getindex(S::AbstractMutableUpperTriangularMatrix{P,T,L}, i, j) where {P,T,L}
+    @boundscheck i > P && ThrowBoundsError("i == $i > $P")
+    j > i && return zero(T)
+    VectorizationBase.load(pointer(S) + (ut_sub2ind(P, i, j) - 1)*sizeof(T))
 end
 @inline function Base.getindex(S::LinearAlgebra.Adjoint{Union{},<:AbstractUpperTriangularMatrix{P,Vec{W,T},L}}, i::Int, j::Int) where {P,T,L,W}
     i < j && return zero(T)
@@ -398,6 +409,8 @@ end
         end
     end
 end
+
+
 
 @generated function Base.:*(
             D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
@@ -838,5 +851,459 @@ end
             $q
         end
         out
+    end
+end
+
+
+
+
+@generated function Base.:*(
+    sp::StackPointer,
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+
+    W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
+    V = Vec{W,T}
+    Wm1 = W - 1
+#    q = quote @show D;  @show L  end
+    q = quote end
+    # Now, what remains of L is a (M-1) x (M-1) lower triangle
+    # we will do W of these at a time.
+    reps = M >> Wshift
+    rem = M & Wm1
+
+    # handle rem first
+    if rem > 0
+        # If rem is smaller than half of W, we may use a smaller vector size here
+        Wrem = VectorizationBase.pick_vector_width(rem, T)
+        full_mask = UInt(2)^Wrem - one(UInt)
+        rem_mask_type = VectorizationBase.mask_type(rem)
+        # could be typemax(UInt) ???
+        # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
+        # so seems like this is safer.
+
+        miss = Wrem - rem
+        base_ind = - miss
+        triangle_ind = base_ind
+        increment = M - 1
+
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        push!(q.args, quote
+            vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
+            vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
+            SIMDPirates.vstore!(vout + $base_ind, SIMDPirates.vmul(vd, vl), $initial_mask)
+        end)
+        triangle_ind += increment
+        increment -= 1
+        for r ∈ 1:rem-1
+            vl = Symbol(:vl_,r)
+            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            push!(q.args, quote
+                $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
+                SIMDPirates.vstore!(
+                    vout + $triangle_ind,
+                    SIMDPirates.vmul(vd, $vl), $mask
+                )
+            end)
+            triangle_ind += increment
+            increment -= 1
+        end
+        base_ind = rem
+    else
+        base_ind = 0
+    end
+
+    # then do reps of W
+    full_mask = UInt(2)^W - one(UInt)
+    if reps > 0
+        rem_quote = quote end
+        mask_type = VectorizationBase.mask_type(W)
+        for w ∈ 1:Wm1
+            vl = Symbol(:vld1_,w)
+            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            push!(rem_quote.args, quote
+                $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
+                SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, $vl), $mask)
+                triangle_ind += increment
+                increment -= 1
+            end)
+        end
+
+        push!(q.args, quote
+
+            for rep ∈ 0:$(reps-1)
+                col1ind = $base_ind + $W * rep
+                # load diagonals
+                vd = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vD + col1ind )
+                vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
+                SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmul(vd, vl))
+
+                triangle_ind = col1ind + $(M-1)
+                increment = $(M - 2)
+
+                for r ∈ 0:($(rem-1) + $W*rep)
+                    vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
+                    SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, vli))
+                    triangle_ind += increment
+                    increment -= 1
+                end
+                $rem_quote
+            end
+        end)
+    end
+    quote
+#        $(Expr(:meta,:inline))
+        d = D.diag
+        (sp,out) = PtrLowerTriangularMatrix{$M,$T,$N}(sp)
+        vD = VectorizationBase.vectorizable(d)
+        vL = VectorizationBase.vectorizable(L)
+        vout = VectorizationBase.vectorizable(out)
+
+        GC.@preserve d L begin
+            $q
+        end
+        (sp,out)
+    end
+end
+
+@generated function Base.muladd(
+    sp::StackPointer,
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N},
+    A::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+
+    W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
+    Wm1 = W - 1
+    V = Vec{W,T}
+    q = quote end
+    # Now, what remains of L is a (M-1) x (M-1) lower triangle
+    # we will do W of these at a time.
+    reps = M >> Wshift
+    rem = M & Wm1
+
+    # handle rem first
+    if rem > 0
+        # If rem is smaller than half of W, we may use a smaller vector size here
+        Wrem = VectorizationBase.pick_vector_width(rem, T)
+        full_mask = UInt(2)^Wrem - one(UInt)
+        rem_mask_type = VectorizationBase.mask_type(rem)
+        # could be typemax(UInt) ???
+        # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
+        # so seems like this is safer.
+
+        miss = Wrem - rem
+        base_ind = - miss
+        triangle_ind = base_ind
+        increment = M - 1
+
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        push!(q.args, quote
+            vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
+            vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
+            va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vA + $base_ind, $initial_mask )
+            SIMDPirates.vstore!(vout + $base_ind, SIMDPirates.vmuladd(vd, vl, va), $initial_mask)
+        end)
+        triangle_ind += increment
+        increment -= 1
+        for r ∈ 1:rem-1
+            vl = Symbol(:vl_,r)
+            va = Symbol(:va_,r)
+            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            push!(q.args, quote
+                $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
+                $va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vA + $triangle_ind, $mask )
+                SIMDPirates.vstore!(
+                    vout + $triangle_ind,
+                    SIMDPirates.vmuladd(vd, $vl, $va), $mask
+                )
+            end)
+            triangle_ind += increment
+            increment -= 1
+        end
+        base_ind = rem
+    else
+        base_ind = 0
+    end
+
+    # then do reps of W
+    full_mask = UInt(2)^W - one(UInt)
+    if reps > 0
+        rem_quote = quote end
+        mask_type = VectorizationBase.mask_type(W)
+        for w ∈ 1:Wm1
+            vl = Symbol(:vl_,w)
+            va = Symbol(:va_,w)
+            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            push!(rem_quote.args, quote
+                $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
+                $va = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vA + triangle_ind, $mask)
+                SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmuladd(vd, $vl, $va), $mask)
+                triangle_ind += increment
+                increment -= 1
+            end)
+        end
+
+        push!(q.args, quote
+
+            for rep ∈ 0:$(reps-1)
+                col1ind = $base_ind + $W * rep
+                # load diagonals
+                vd = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vD + col1ind )
+                vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
+                va = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vA + col1ind )
+                SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmuladd(vd, vl, va))
+
+                triangle_ind = col1ind + $(M-1)
+                increment = $(M - 2)
+
+                for r ∈ 0:($(rem-1) + $W*rep)
+                    vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
+                    vai = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vA + triangle_ind )
+                    SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmuladd(vd, vli, vai))
+                    triangle_ind += increment
+                    increment -= 1
+                end
+                $rem_quote
+            end
+        end)
+    end
+    quote
+#        $(Expr(:meta,:inline))
+        d = D.diag
+        (sp,out) = PtrLowerTriangularMatrix{$M,$T,$N}(sp)
+        vD = VectorizationBase.vectorizable(d)
+        vL = VectorizationBase.vectorizable(L)
+        vA = VectorizationBase.vectorizable(A)
+        vout = VectorizationBase.vectorizable(out)
+
+        GC.@preserve d L vA begin
+            $q
+        end
+        (sp,out)
+    end
+end
+
+
+@generated function row_sum_prod(
+    sp::StackPointer,
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,N}
+    W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
+    Wm1 = W - 1
+    V = Vec{W,T}
+    q = quote end
+    # Now, what remains of L is a (M-1) x (M-1) lower triangle
+    # we will do W of these at a time.
+    reps = M >> Wshift
+    rem = M & Wm1
+
+    # handle rem first
+    if rem > 0
+        # If rem is smaller than half of W, we may use a smaller vector size here
+        Wrem = VectorizationBase.pick_vector_width(rem, T)
+        full_mask = UInt(2)^Wrem - one(UInt)
+        rem_mask_type = VectorizationBase.mask_type(rem)
+        # could be typemax(UInt) ???
+        # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
+        # so seems like this is safer.
+
+        miss = Wrem - rem
+        base_ind = - miss
+        triangle_ind = base_ind
+        increment = M - 1
+
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        push!(q.args, quote
+            vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
+            vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
+            vcumulative = SIMDPirates.vmul(vld1, vld2)
+        end)
+        triangle_ind += increment
+        increment -= 1
+        for r ∈ 1:rem-1
+            vld1 = Symbol(:vld1_,r)
+            vld2 = Symbol(:vld2_,r)
+            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            push!(q.args, quote
+                $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $triangle_ind, $mask )
+                $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $triangle_ind, $mask )
+                vcumulative = SIMDPirates.vmuladd($vld1, $vld2, vcumulative)
+            end)
+            triangle_ind += increment
+            increment -= 1
+        end
+        push!(q.args, :(SIMDPirates.vstore!(vout + $base_ind, vcumulative, $initial_mask)))
+        base_ind = rem
+    else
+        base_ind = 0
+    end
+
+    # then do reps of W
+    full_mask = UInt(2)^W - one(UInt)
+    if reps > 0
+        rem_quote = quote end
+        mask_type = VectorizationBase.mask_type(W)
+        for w ∈ 1:Wm1
+            vld1 = Symbol(:vld1_,w)
+            vld2 = Symbol(:vld2_,w)
+            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            push!(rem_quote.args, quote
+                $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
+                $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)
+                vcumulative = SIMDPirates.vmuladd($vld1, $vld2, vcumulative)
+                triangle_ind += increment
+                increment -= 1
+            end)
+        end
+
+        push!(q.args, quote
+
+            for rep ∈ 0:$(reps-1)
+                col1ind = $base_ind + $W * rep
+                # load diagonals
+                vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + col1ind )
+                vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + col1ind )
+                vcumulative = SIMDPirates.vmul(vld1, vld2)
+
+                triangle_ind = col1ind + $(M-1)
+                increment = $(M - 2)
+
+                for r ∈ 0:($(rem-1) + $W*rep)
+                    vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + triangle_ind )
+                    vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + triangle_ind )
+                    vcumulative = SIMDPirates.vmuladd(vld1, vld2, vcumulative)
+                    triangle_ind += increment
+                    increment -= 1
+                end
+                $rem_quote
+                SIMDPirates.vstore!(vout + col1ind, vcumulative)
+            end
+        end)
+    end
+    quote
+#        $(Expr(:meta,:inline))
+        (sp,out) = PtrVector{$M,$T}(sp)
+        vL1 = VectorizationBase.vectorizable(L1)
+        vL2 = VectorizationBase.vectorizable(L2)
+        vout = VectorizationBase.vectorizable(out)
+        GC.@preserve L1 L2 begin
+            $q
+        end
+        sp,out
+    end
+end
+
+@generated function row_sum_prod_add(
+    sp::StackPointer,
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N},
+    v::AbstractFixedSizePaddedVector{M,T}
+) where {M,T,N}
+    W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
+    Wm1 = W - 1
+    V = Vec{W,T}
+    q = quote end
+    # Now, what remains of L is a (M-1) x (M-1) lower triangle
+    # we will do W of these at a time.
+    reps = M >> Wshift
+    rem = M & Wm1
+
+    # handle rem first
+    if rem > 0
+        # If rem is smaller than half of W, we may use a smaller vector size here
+        Wrem = VectorizationBase.pick_vector_width(rem, T)
+        full_mask = UInt(2)^Wrem - one(UInt)
+        rem_mask_type = VectorizationBase.mask_type(rem)
+        # could be typemax(UInt) ???
+        # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
+        # so seems like this is safer.
+
+        miss = Wrem - rem
+        base_ind = - miss
+        triangle_ind = base_ind
+        increment = M - 1
+
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        push!(q.args, quote
+            vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
+            vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
+            vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vv + $base_ind, $initial_mask ))
+        end)
+        triangle_ind += increment
+        increment -= 1
+        for r ∈ 1:rem-1
+            vld1 = Symbol(:vld1_,r)
+            vld2 = Symbol(:vld2_,r)
+            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            push!(q.args, quote
+                $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $triangle_ind, $mask )
+                $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $triangle_ind, $mask )
+                vcumulative = SIMDPirates.vmuladd($vld1, $vld2, vcumulative)
+            end)
+            triangle_ind += increment
+            increment -= 1
+        end
+        push!(q.args, :(SIMDPirates.vstore!(vout + $base_ind, vcumulative, $initial_mask)))
+        base_ind = rem
+    else
+        base_ind = 0
+    end
+
+    # then do reps of W
+    full_mask = UInt(2)^W - one(UInt)
+    if reps > 0
+        rem_quote = quote end
+        mask_type = VectorizationBase.mask_type(W)
+        for w ∈ 1:Wm1
+            vld1 = Symbol(:vld1_,w)
+            vld2 = Symbol(:vld2_,w)
+            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            push!(rem_quote.args, quote
+                $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
+                $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)
+                vcumulative = SIMDPirates.vmuladd($vld1, $vld2, vcumulative)
+                triangle_ind += increment
+                increment -= 1
+            end)
+        end
+
+        push!(q.args, quote
+
+            for rep ∈ 0:$(reps-1)
+                col1ind = $base_ind + $W * rep
+                # load diagonals
+                vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + col1ind )
+                vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + col1ind )
+                vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vv + col1ind))
+
+                triangle_ind = col1ind + $(M-1)
+                increment = $(M - 2)
+
+                for r ∈ 0:($(rem-1) + $W*rep)
+                    vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + triangle_ind )
+                    vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + triangle_ind )
+                    vcumulative = SIMDPirates.vmuladd(vld1, vld2, vcumulative)
+                    triangle_ind += increment
+                    increment -= 1
+                end
+                $rem_quote
+                SIMDPirates.vstore!(vout + col1ind, vcumulative)
+            end
+        end)
+    end
+    quote
+        $(Expr(:meta,:inline))
+        (sp,out) = PtrVector{$M,$T}(sp)
+        vv = VectorizationBase.vectorizable(v)
+        vL1 = VectorizationBase.vectorizable(L1)
+        vL2 = VectorizationBase.vectorizable(L2)
+        vout = VectorizationBase.vectorizable(out)
+        GC.@preserve v L1 L2 out begin
+            $q
+        end
+        sp,out
     end
 end

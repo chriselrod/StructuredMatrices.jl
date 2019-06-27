@@ -23,11 +23,15 @@ mutable struct MutableUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriang
     data::NTuple{L,T}
     MutableUpperTriangularMatrix{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
-struct PtrLowerTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P,T,L}
+struct PtrLowerTriangularMatrix{P,T,L} <: AbstractMutableLowerTriangularMatrix{P,T,L}
     ptr::Ptr{T}
 end
 struct PtrUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P,T,L}
     ptr::Ptr{T}
+end
+
+function PtrLowerTriangularMatrix{P,T,L}(sp::StackPointer) where {P,T,L}
+    sp + sizeof(T) * L, PtrLowerTriangularMatrix{P,T,L}(pointer(sp, T))
 end
 
 @generated function PtrLowerTriangularMatrix{P,T}(sp::PaddedMatrices.StackPointer) where {P,T}
@@ -64,6 +68,24 @@ end
         $(Expr(:meta,:inline))
         MutableUpperTriangularMatrix{$P,$T,$L}(undef)
     end
+end
+function MutableLowerTriangularMatrix(
+    B::Union{A,LinearAlgebra.Adjoint{T,A}}
+) where {T,M,A <: AbstractFixedSizePaddedMatrix{M,M,T}}
+    L = MutableLowerTriangularMatrix{M,T}(undef)
+    @inbounds for mc ∈ 1:M, mr ∈ mc:M
+        L[mr,mc] = B[mr,mc]
+    end
+    L
+end
+function MutableUpperTriangularMatrix(
+    B::Union{A,LinearAlgebra.Adjoint{T,A}}
+) where {T,M,A <: AbstractFixedSizePaddedMatrix{M,M,T}}
+    U = MutableLowerTriangularMatrix{M,T}(undef)
+    @inbounds for mc ∈ 1:M, mr ∈ 1:mc
+        U[mr,mc] = B[mr,mc]
+    end
+    U
 end
 
 function copyto!(L::MutableLowerTriangularMatrix{M,T}, A::Matrix) where {M,T}
