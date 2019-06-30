@@ -464,7 +464,7 @@ end
     end
 end
 
-
+@generated PaddedMatrices.type_length(::Type{<:AbstractTriangularMatrix{M}}) where {M} = binomial2(M+1)
 
 # function diagonal_lowertri_output_tuple_expr(P, W, diagname = :diag_, colname = :c_)
 #     outtup = Expr(:tuple, )
