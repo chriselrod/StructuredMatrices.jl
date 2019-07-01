@@ -11,12 +11,7 @@ Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
 @inline VectorizationBase.vectorizable(A::BlockDiagonalColumnView) = VectorizationBase.vectorizable(A.data)
 
 
-@generated function LinearAlgebra.mul!(
-    c::PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T},
-    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
-    BD::BlockDiagonalColumnView{M,N,T,PB}
-) where {M,N,T,PA,PB}
-    
+function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
     unroll = N > 7 ? 4 : N
     if N == unroll
         loop_body = quote end
@@ -29,11 +24,21 @@ Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
             @vectorize $T for m ∈ 1:$M #$P # Can we assume the padding is uncontaminated?
                 $loop_body
             end
-            @inbounds begin
-                Base.Cartesian.@nexprs $unroll i -> c[i] = s_i
-            end
-            c
         end
+        if increment
+            push!(q.args, quote
+                  @inbounds begin
+                  Base.Cartesian.@nexprs $unroll i -> c[i] += s_i
+                  end
+                  end)
+        else
+            push!(q.args, quote
+                  @inbounds begin
+                  Base.Cartesian.@nexprs $unroll i -> c[i] = s_i
+                  end
+                  end)
+        end
+        push!(q.args, :c)
 #        println(q)
         return q
     end
@@ -64,9 +69,19 @@ Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
             @vectorize $T for m ∈ 1:$M #$P # Can we assume the padding is uncontaminated?
                 $loop_body
             end
-            @inbounds begin
-                Base.Cartesian.@nexprs $unroll i -> c[i + $unroll*n] = s_i
-            end
+        end
+        if increment
+            push!(q.args, quote
+                  @inbounds begin
+                  Base.Cartesian.@nexprs $unroll i -> c[i + $unroll*n] += s_i
+                  end
+                  end)
+        else
+            push!(q.args, quote
+                  @inbounds begin
+                  Base.Cartesian.@nexprs $unroll i -> c[i + $unroll*n] = s_i
+                  end
+                  end)
         end
     end
     
@@ -77,7 +92,11 @@ Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
             ssym = Symbol(:s_,n)
             push!(q.args, :($ssym = zero($T)))
             push!(loop_body.args, :($ssym += A[m + $((n-1)*PA) ] * BD[m + $((n-1)*PB)]))
-            push!(assignments.args, :( c[$n] = $ssym ) )
+            if increment
+                push!(assignments.args, :( c[$n] += $ssym ) )
+            else
+                push!(assignments.args, :( c[$n] = $ssym ) )
+            end
         end
         push!(q.args, quote
             @vectorize $T for m ∈ 1:$M
@@ -88,8 +107,20 @@ Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
             end
         end)
     end
-    push!(q.args, :(c))
+ #   push!(q.args, :(c))
     q
+
+end
+
+@generated function LinearAlgebra.mul!(
+    c::PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T},
+    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
+    BD::BlockDiagonalColumnView{M,N,T,PB}
+) where {M,N,T,PA,PB}
+    quote
+        $(block_diagonal_column_view_quote(M,N,T,PA,PB,false))
+        c
+    end
 end
 function Base.:*(
     A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
@@ -98,11 +129,26 @@ function Base.:*(
     c  = MutableFixedSizePaddedVector{N,T}(undef)
     mul!(c, A, BD)'
 end
-function Base.:*(
+@generated function Base.:*(
     sp::PaddedMatrices.StackPointer,
     A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB}
 ) where {M,N,T,PA,PB}
-    sp, c  = PtrVector{N,T}(sp)
-    sp, mul!(c, A, BD)'
+    P = min(PA,PB)
+    quote
+        c  = PtrVector{$N,$T,$N,$N}(pointer(sp,$T))
+        sp + $(sizeof(T)*N), mul!(c, A, BD)'
+    end
+end
+@generated function PaddedMatrices.RESERVED_INCREMENT_SEED_RESERVED(
+    sp::PaddedMatrices.StackPointer,
+    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
+    BD::BlockDiagonalColumnView{M,N,T,PB},
+    c′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T,PC,PC}}
+) where {M,N,T,PA,PB,PC}
+    quote
+        c = c′'
+        $(block_diagonal_column_view_quote(M,N,T,PA,PB,true))
+        sp, c′
+    end
 end
