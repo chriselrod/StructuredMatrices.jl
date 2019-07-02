@@ -28,7 +28,7 @@ function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
         if increment
             push!(q.args, quote
                   @inbounds begin
-                  Base.Cartesian.@nexprs $unroll i -> c[i] += s_i
+                  Base.Cartesian.@nexprs $unroll i -> c[i] = d[i] + s_i
                   end
                   end)
         else
@@ -73,7 +73,7 @@ function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
         if increment
             push!(q.args, quote
                   @inbounds begin
-                  Base.Cartesian.@nexprs $unroll i -> c[i + $unroll*n] += s_i
+                  Base.Cartesian.@nexprs $unroll i -> c[i + $unroll*n] = d[i + $unroll*n] + s_i
                   end
                   end)
         else
@@ -93,7 +93,7 @@ function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
             push!(q.args, :($ssym = zero($T)))
             push!(loop_body.args, :($ssym += A[m + $((n-1)*PA) ] * BD[m + $((n-1)*PB)]))
             if increment
-                push!(assignments.args, :( c[$n] += $ssym ) )
+                push!(assignments.args, :( c[$n] = d[$n] + $ssym ) )
             else
                 push!(assignments.args, :( c[$n] = $ssym ) )
             end
@@ -144,11 +144,12 @@ end
     sp::PaddedMatrices.StackPointer,
     A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB},
-    c′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T,PC,PC}}
+    d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T,PC,PC}}
 ) where {M,N,T,PA,PB,PC}
     quote
-        c = c′'
+        d = d′'
+        c = PtrVector{$N,$T,$N,$N}(pointer(sp,$T))
         $(block_diagonal_column_view_quote(M,N,T,PA,PB,true))
-        sp, c′
+        sp + $(N*sizeof(T)), c'
     end
 end

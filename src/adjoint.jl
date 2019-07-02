@@ -47,7 +47,8 @@ end
 ) where {M,T}
     quote
         $(Expr(:meta,:inline))
-        @vectorize for m ∈ 1:$M
+        # Should this be made to copy!?!?!?
+        @vvectorize for m ∈ 1:$M
             A[m] = D[m] + A[m]
         end
         A
@@ -118,7 +119,8 @@ end=#
 ) where {M,T}
     quote
         $(Expr(:meta,:inline))
-        @vectorize for m ∈ 1:$M
+        # Should this be made to copy!?!?!?
+        LoopVectorization.@vvectorize for m ∈ 1:$M
             A[m] = D[m] + A[m]
         end
         (sp, A)
