@@ -96,6 +96,9 @@ function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractVector) whe
         ρ, τ, UnevenSpacing()
     ))
 end
+@inline function AutoregressiveMatrix(ρ::T, τ::AbstractFixedSizePaddedVector{nT,T}) where {nT,T}
+    AutoregressiveMatrix(ρ, τ, UnevenSpacing())
+end
 function AutoregressiveMatrix(ρ::T, τ::AbstractVector) where {T}
     ar = cache(AutoregressiveMatrix(
         ρ, τ, UnevenSpacing()
@@ -161,7 +164,7 @@ end
 
 
 @inline Base.size(AR::AbstractAutoregressiveMatrix{T,V}) where {T,V<:AbstractRange} = (t = length(AR.τ); (t,t))
-@inline Base.size(AR::AbstractAutoregressiveMatrix) = (t = length(AR.τ)+1; (t,t))
+@inline Base.size(AR::AbstractAutoregressiveMatrix) = (t = length(AR.τ); (t,t))
 # @inline Base.size(AR::AbstractAutoregressiveMatrixAdjoint{T,V}) where {T,V<:AbstractRange} = (t = length(AR.τ); (t,t))
 # @inline Base.size(AR::AbstractAutoregressiveMatrixAdjoint) = (t = length(AR.τ)+1; (t,t))
 
@@ -1316,4 +1319,79 @@ function ∂mul_and_quadform(
 
     q
 
+end
+
+
+
+@generated function Base.copyto!(
+    A::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{nT,nT,T,R1},
+    AR::AutoregressiveMatrix{T,VT}
+) where {nT,T,R1,R2,VT <: PaddedMatrices.AbstractFixedSizePaddedVector{nT,T,R2}}
+    # We will assume rho > 0
+    R = min(R1,R2)
+    W, Wshift = VectorizationBase.pick_vector_width_shift(nT, T)
+    Wm1 = W - 1
+    V = Vec{W,T}
+    nTl = (nT + Wm1) & ~Wm1
+    # We want it to be a multiple of 8, and we don't want nTl bleeding over the edge
+    T_size = sizeof(T)
+    q = quote
+        times = AR.τ
+        ptr_A = pointer(A)
+        ρ = AR.ρ
+        # We want to use Base.log, and not fastmath log.
+        logρ = $(T == Float64 ? :(ccall(:log,Float64,(Float64,),ρ))  :  :(Base.log(ρ)))
+#        vρ = SIMDPirates.vbroadcast($V, ρ)
+    end
+    reps = (nTl >> Wshift) - 1
+#    if false#reps > 10
+    if true#reps > 10
+        rem = nTl & Wm1
+        inner_loop = quote
+            for i ∈ tcouter:$((nTl>>Wshift)-1)
+                vtimes_tr = SIMDPirates.vload($V, ptr_time + i * $(W))
+                vδt = SIMDPirates.vabs(SIMDPirates.vsub(vtimes_tr, vtime_tc))
+                AR_offset = (tc-1)*$(T_size*R) + i*$(W*T_size)
+                SIMDPirates.vstore!(ptr_A + AR_offset, SLEEFPirates.exp(SIMDPirates.vmul(vδt,vlogρ)))
+            end
+        end
+        if rem > 0
+            mask = VectorizationBase.mask(Val(W), rem)
+            push!(inner_loop.args, quote
+                  vtimes_tr = SIMDPirates.vload($V, ptr_time + i * $(W), $mask)
+                  vδt = SIMDPirates.vabs(SIMDPirates.vsub(vtimes_tr, vtime_tc))
+                  AR_offset = (tc-1)*$(T_size*R) + i*$(W*T_size)
+                  SIMDPirates.vstore!(ptr_A + AR_offset, SLEEFPirates.exp(SIMDPirates.vmul(vδt,vlogρ)), $mask)
+                  end)
+        end
+        loop_q = quote
+            ptr_time = VectorizationBase.vpointer(times)
+            vlogρ = SIMDPirates.vbroadcast($V, logρ)
+            @inbounds for tcouter ∈ 0:$((nTl>>Wshift)-1)
+                for tcinner ∈ 1:$W
+                    Wtcouter = $W*tcouter
+                    tc = tcinner + Wtcouter
+                    tc > $nT && break
+                    for tr ∈ 1:Wtcouter
+                        A[tr,tc] = A[tc,tr]
+                    end
+                    vtime_tc = SIMDPirates.vbroadcast($V, times[tc])
+                    $inner_loop
+                end
+            end
+        end
+    else
+        loop_q = quote
+            @inbounds for c ∈ 0:$(nT-1)
+                time_c = times[c+1]
+                LoopVectorization.@vvectorize $T for r ∈ 1:$R
+                    times_r = times[r]
+                    δt = abs(times_r - time_c)
+                    A[r + $R1*c] = exp(δt * logρ)
+                end
+            end
+        end
+    end
+    push!(q.args, loop_q)
+    q
 end
