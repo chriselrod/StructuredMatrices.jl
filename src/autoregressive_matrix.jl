@@ -1326,7 +1326,7 @@ end
 @generated function Base.copyto!(
     A::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{nT,nT,T,R1},
     AR::AutoregressiveMatrix{T,VT}
-) where {nT,T,R1,R2,VT <: PaddedMatrices.AbstractFixedSizePaddedVector{nT,T,R2}}
+) where {T,nT,R1,R2,VT <: PaddedMatrices.AbstractFixedSizePaddedVector{nT,T,R2}}
     # We will assume rho > 0
     R = min(R1,R2)
     W, Wshift = VectorizationBase.pick_vector_width_shift(nT, T)
@@ -1341,6 +1341,7 @@ end
         ρ = AR.ρ
         # We want to use Base.log, and not fastmath log.
         logρ = $(T == Float64 ? :(ccall(:log,Float64,(Float64,),ρ))  :  :(Base.log(ρ)))
+#        logρ = log2(ρ)
 #        vρ = SIMDPirates.vbroadcast($V, ρ)
     end
     reps = (nTl >> Wshift) - 1
