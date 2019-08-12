@@ -21,12 +21,33 @@ column 4: 1 elements + 3 padding
     @boundscheck i > P && ThrowBoundsError("max(i, j) = $j > $P.")
     @inbounds S.data[lt_sub2ind(P, i, j)]
 end
-
 @inline function Base.getindex(S::AbstractSymmetricMatrixU{P,T,L}, i, j) where {P,T,L}
     i, j = minmax(i, j)
     @boundscheck j > P && ThrowBoundsError("max(i, j) = $j > $P.")
     @inbounds S.data[ut_sub2ind(P, i, j)]
 end
+
+@inline function Base.setindex!(S::AbstractMutableSymmetricMatrixL{P,T,L}, v::T, i, j) where {P,T,L}
+    j, i = minmax(j, i)
+    @boundscheck i > P && ThrowBoundsError("max(i, j) = $j > $P.")
+    VectorizationBase.store!(pointer(S) + sizeof(T) * (lt_sub2ind(P, i, j)-1), v)
+    @inbounds S.data[lt_sub2ind(P, i, j)]
+end
+@inline function Base.setindex!(S::AbstractMutableSymmetricMatrixU{P,T,L}, v::T, i, j) where {P,T,L}
+    i, j = minmax(i, j)
+    @boundscheck j > P && ThrowBoundsError("max(i, j) = $j > $P.")
+    VectorizationBase.store!(pointer(S) + sizeof(T) * (ut_sub2ind(P, i, j)-1), v)
+end
+
+#@inline function Base.setindex!(S::AbstractMutableSymmetricMatrixL{P,T,L}, v::T, i) where {P,T,L}
+#    j, i = minmax(j, i)
+#    @boundscheck i > P && ThrowBoundsError("i = $i > $L = L")
+#    VectorizationBase.store!(pointer(S) + sizeof(T) * i, v)
+#end
+#@inline function Base.setindex!(S::AbstractMutableSymmetricMatrixU{P,T,L}, v::T, i) where {P,T,L}
+#    @boundscheck i > L && ThrowBoundsError("i = $i > $L = L")
+#    VectorizationBase.store!(pointer(S) + sizeof(T) * i, v)
+#end
 
 @generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{M,M,T,P}) where {M,T,P}
     Lbase = binomial2(M+1)
@@ -46,6 +67,19 @@ end
         push!(outtup.args, :($(zero(T))))
     end
     :(@inbounds SymmetricMatrixL{$M,$T,$Lfull}($outtup))
+end
+function MutableSymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{M,M,T,P}) where {M,T,P}
+    Lbase = binomial2(M+1)
+#    Wm1 = VectorizationBase.pick_vector_width(Lbase, T) - 1
+    #    Lfull = (Lbase + Wm1) & ~Wm1
+    Sm = MutableSymmetricMatrixL{M,T,Lbase}(undef)
+    @inbounds for m ∈ 1:M
+        Sm[m] = S[m,m]
+    end
+    @inbounds for mc ∈ 1:M-1, mr ∈ mc+1:M
+        Sm[mr,mc] = S[mr,mc]
+    end
+    Sm
 end
 
 # @generated function lower_cholesky(Σ::SymmetricMatrixL{P,T,L}) where {P,T,L}

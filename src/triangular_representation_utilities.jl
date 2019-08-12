@@ -127,8 +127,8 @@ end
 abstract type AbstractSymmetricMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
 abstract type AbstractSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
 abstract type AbstractSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
-abstract type AbstractMutableSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
-abstract type AbstractMutableSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
+abstract type AbstractMutableSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L} end
+abstract type AbstractMutableSymmetricMatrixU{P,T,L} <: AbstractSymmetricMatrixU{P,T,L} end
 
 struct SymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrixL{P,T,L}
     data::NTuple{L,T}
@@ -137,6 +137,12 @@ mutable struct MutableSymmetricMatrixL{P,T,L} <: AbstractMutableSymmetricMatrixL
     data::NTuple{L,T}
     MutableSymmetricMatrixL{P,T,L}(::UndefInitializer) where {P,T,L} = new{P,T,L}()
 end
+function MutableSymmetricMatrixL(S::SymmetricMatrixL{M,T,L}) where {M,T,L}
+    Sm = MutableSymmetricMatrixL{M,T,L}(undef)
+    Sm.data = S.data
+    Sm
+end
+
 struct PtrSymmetricMatrixL{P,T,L} <: AbstractMutableSymmetricMatrixL{P,T,L}
     ptr::Ptr{T}
 end
