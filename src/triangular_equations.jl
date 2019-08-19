@@ -19,7 +19,10 @@
 ### 
 
 
+# Ustride
+# if ilL′
 
+# K is number of earlier iterations
 function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Ustride, isL′, invdiagptr,
@@ -59,10 +62,10 @@ function A_rdiv_U_kernel_quote(
     end
     
     if !isL′
-        coff = Uoffset
+        coff = Ustride
         for c ∈ 0:C-1
             coff += c
-            push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), coff))
+            push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), coff*size_T))
         end
     end
     # We don't need to mask these loads.
@@ -71,7 +74,7 @@ function A_rdiv_U_kernel_quote(
     if K isa Symbol || K > 0
         loopbody = quote end
         for r ∈ 0:Riterl
-            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + j*$(Astride*size_T) + $(r*W))))
+            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + j*$(Astride*size_T) + $(r*W*size_T))))
         end
         if isL′
             push!(loopbody.args, :($Utrisym += Ustride - j))
@@ -79,9 +82,9 @@ function A_rdiv_U_kernel_quote(
         for c ∈ 0:C-1
             if isL′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $c))))
+                push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(c*size_T)))))
             else
-                push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + j))))
+                push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + (j*$size_T)))))
             end
             for r ∈ 0:Riterl
                 push!(loopbody.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_j)), $(Symbol(:U_j_,c)), $(Symbol(:A_,r,:_,c)))))
@@ -109,9 +112,9 @@ function A_rdiv_U_kernel_quote(
         for c ∈j+1:C-1
             if isL′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $c))))
+                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(c*size_T)))))
             else
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + $j))))
+                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + $(K isa Symbol ? :($size_T*($K+$c)) : size_T*(K+c) )))))
             end
             for r ∈ 0:Riterl
                 push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_,j)), $(Symbol(:U_,j,:_,c)), $(Symbol(:A_,r,:_,c)))))
@@ -143,7 +146,8 @@ end
 
 
 
-
+# ptr and Lstride is so that the first of the reverse iterations has offset 0
+# K is the amount of preceding columns.
 function A_rdiv_L_kernel_quote(
     R, C, K::Union{Symbol,Integer}, Kmax::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Lstride, isU′, invdiagptr,
@@ -187,18 +191,23 @@ function A_rdiv_L_kernel_quote(
     if K isa Symbol || Kmax isa Symbol || (K + C < Kmax)
         if isU′
             Ltrisym2 = Symbol(:Ltrisym, 2)
+            CtriL = (C*(C+1)) >> 1
             if K isa Symbol
-                push!(q.args, :(KpC = $K+$C))
-                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + (($KpC*($KpC+1))>>1) - (($K*($K+1))>>1))))
+#                push!(q.args, :(KpC = $K+$C))
+                #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + ((KpC*(KpC+1))>>1) - (($K*($K+1))>>1))))
+                push!(q.args, Expr(:(=), Ltrisym2, :($CtriL + $K*$C)))
             else
-                KpC = K + C
-                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + $(((KpC*(KpC+1))>>1)-((K*(K+1))>>1)))))
+#                KpC = K + C
+                #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + $(((KpC*(KpC+1))>>1)-((K*(K+1))>>1)))))
+                push!(q.args, Expr(:(=), Ltrisym2, :($(CtriL + K*C))))
             end
-        else
+        else#if !isU′
+            Ltrisym2 = Ltrisym
             coff = Loffset
             for c ∈ 0:C-1
-                coff += Lstride - c
+                coff += C - c
                 push!(q.args, Expr(:(=), Symbol(:Loffset_,c), coff))
+                coff += Kmax - C
             end
         end
         loopbody = quote end
@@ -211,9 +220,9 @@ function A_rdiv_L_kernel_quote(
         for c ∈ 0:C-1
             if isU′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $c))))
+                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(c*size_T)))))
             else
-                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $(Symbol(:Loffset_,c)) + j))))
+                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(Symbol(:Loffset_,c)) + j))))
             end
             for r ∈ 0:Riterl
                 push!(loopbody.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_j)), $(Symbol(:L_j_,c)), $(Symbol(:A_,r,:_,c)))))
@@ -247,15 +256,15 @@ function A_rdiv_L_kernel_quote(
         for r ∈ 0:Riterl
             push!(q.args, :($(Symbol(:A_,r,:_,j)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,j)), $vLjj)))
         end
-        if isL′ && j < C-1
-            push!(q.args, :($Utrisym += Ustride - $j))
+        if isU′ && j < C-1
+            push!(q.args, :($Ltrisym += Lstride - $j))
         end
         for c ∈j+1:C-1
-            if isL′ # U is actually a transposed lower triangular matrix
+            if isU′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $c))))
+                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $(c*size_T)))))
             else
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + $j))))
+                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $(Symbol(:Uoffset_,c)) + $(j*size_T)))))
             end
             for r ∈ 0:Riterl
                 push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_,j)), $(Symbol(:U_,j,:_,c)), $(Symbol(:A_,r,:_,c)))))
