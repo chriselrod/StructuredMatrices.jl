@@ -27,7 +27,7 @@ function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Ustride, isL′, invdiagptr,
     Bsym = :ptrB, Asym = :ptrA, Utrisym = :ptrUtri, Udiagsym = :ptrUdiag,
-    maskload = true
+    maskload = true, loadB = true, storeA = true
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
@@ -36,36 +36,37 @@ function A_rdiv_U_kernel_quote(
     Riter = R >> Wshift
     Rrem = R & Wm1
     mask = VectorizationBase.mask_from_remainder(T, Rrem)
-    if K isa Symbol
-        q = quote
-            BsymK = $Bsym + $(size_T*Bstride)*$K
-            AsymK = $Asym + $(size_T*Astride)*$K
+    if loadB
+        if K isa Symbol
+            q = quote
+                BsymK = $Bsym + $(size_T*Bstride)*$K
+                AsymK = $Asym + $(size_T*Astride)*$K
+            end
+        else
+            q = quote
+                BsymK = $Bsym + $(size_T*Bstride*K)
+                AsymK = $Asym + $(size_T*Astride*K)
+            end
         end
-    else
-        q = quote
-            BsymK = $Bsym + $(size_T*Bstride*K)
-            AsymK = $Asym + $(size_T*Astride*K)
-        end
-    end
-    for c ∈ 0:C-1
-        for r ∈ 0:Riter-1
-            push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) ) ))
-        end
-        if Rrem > 0
-            # Only need to mask if we're on last column
-            if maskload && c == C-1
-                push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
-            else
-                push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+        for c ∈ 0:C-1
+            for r ∈ 0:Riter-1
+                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) ) ))
+            end
+            if Rrem > 0
+                # Only need to mask if we're on last column
+                if maskload && c == C-1
+                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
+                else
+                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+                end
             end
         end
     end
-    
     if !isL′
         coff = Ustride
         for c ∈ 0:C-1
-            coff += c
             push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), coff*size_T))
+            coff += c
         end
     end
     # We don't need to mask these loads.
@@ -77,7 +78,7 @@ function A_rdiv_U_kernel_quote(
             push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + j*$(Astride*size_T) + $(r*W*size_T))))
         end
         if isL′
-            push!(loopbody.args, :($Utrisym += Ustride - j))
+            push!(loopbody.args, :($Utrisym += $Ustride - j))
         end
         for c ∈ 0:C-1
             if isL′ # U is actually a transposed lower triangular matrix
@@ -100,39 +101,46 @@ function A_rdiv_U_kernel_quote(
 
     # Update using just-calculated block
     scaleop = invdiagptr ? :vmul : :vfdiv
+    if isL′
+        trioff = 0
+    end
     for j ∈ 0:C-1
         vUjj = Symbol(:vU_,j,:_,j)
         push!(q.args, Expr(:(=), vUjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Udiagsym + $(size_T*j))))))
         for r ∈ 0:Riterl
             push!(q.args, :($(Symbol(:A_,r,:_,j)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,j)), $vUjj)))
         end
-        if isL′ && j < C-1
-            push!(q.args, :($Utrisym += Ustride - $j))
+        if isL′ && j < C-1 && j > 0
+            if K isa Symbol
+                push!(q.args, :($Utrisym += $size_T*($(Ustride - j) - $K)))
+            else
+                trioff += size_T*(Ustride - K - j)
+            end
         end
-        for c ∈j+1:C-1
+        for c ∈ j+1:C-1
             if isL′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(c*size_T)))))
+                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $((c-1-j)*size_T + trioff)))))
             else
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + $(K isa Symbol ? :($size_T*($K+$c)) : size_T*(K+c) )))))
+                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + $(K isa Symbol ? :($size_T*($K+$j)) : size_T*(K+j) )))))
             end
             for r ∈ 0:Riterl
                 push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_,j)), $(Symbol(:U_,j,:_,c)), $(Symbol(:A_,r,:_,c)))))
             end
         end
     end
-    
     # Store in A
-    for c ∈ 0:C-1
-        for r ∈ 0:Riter-1
-            push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
-        end
-        if Rrem > 0
-            push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+    if storeA
+        for c ∈ 0:C-1
+            for r ∈ 0:Riter-1
+                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
+            end
+            if Rrem > 0
+                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+            end
         end
     end
     q
-
 end
 function A_rdiv_U_quote(K::Union{Symbol,Integer}, ::Type{T}) where {T}
 
@@ -152,7 +160,7 @@ function A_rdiv_L_kernel_quote(
     R, C, K::Union{Symbol,Integer}, Kmax::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Lstride, isU′, invdiagptr,
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
-    maskload = true
+    maskload = true, loadB = true, storeA = true
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
@@ -161,32 +169,42 @@ function A_rdiv_L_kernel_quote(
     Riter = R >> Wshift
     Rrem = R & Wm1
     mask = VectorizationBase.mask_from_remainder(T, Rrem)
-    if K isa Symbol
-        q = quote
-            BsymK = $Bsym + $(size_T*Bstride)*$K
-            AsymK = $Asym + $(size_T*Astride)*$K
+    if loadB
+        if K isa Symbol
+            q = quote
+                BsymK = $Bsym + $(size_T*Bstride)*$K
+                AsymK = $Asym + $(size_T*Astride)*$K
+            end
+        else
+            q = quote
+                BsymK = $Bsym + $(size_T*Bstride*K)
+                AsymK = $Asym + $(size_T*Astride*K)
+            end
         end
-    else
-        q = quote
-            BsymK = $Bsym + $(size_T*Bstride*K)
-            AsymK = $Asym + $(size_T*Astride*K)
-        end
-    end
-    for c ∈ 0:C-1
-        for r ∈ 0:Riter-1
-            push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) ) ))
-        end
-        if Rrem > 0
-            # Only need to mask if we're on last column
-            if maskload && c == C-1
-                push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
-            else
-                push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+        for c ∈ 0:C-1
+            for r ∈ 0:Riter-1
+                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) ) ))
+            end
+            if Rrem > 0
+                # Only need to mask if we're on last column
+                if maskload && c == C-1
+                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
+                else
+                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+                end
             end
         end
     end
     # We don't need to mask these loads.
     Riterl = Rrem > 0 ? Riter : Riter-1
+    if !isU′
+        Ltrisym2 = Ltrisym
+        coff = Lstride
+        for c ∈ 0:C-1
+            push!(q.args, Expr(:(=), Symbol(:Loffset_,c), coff*size_T))
+            coff += Lstride - c - 2
+        end
+    end
     # Updating based on all earlier columns
     if K isa Symbol || Kmax isa Symbol || (K + C < Kmax)
         if isU′
@@ -201,14 +219,6 @@ function A_rdiv_L_kernel_quote(
                 #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + $(((KpC*(KpC+1))>>1)-((K*(K+1))>>1)))))
                 push!(q.args, Expr(:(=), Ltrisym2, :($(CtriL + K*C))))
             end
-        else#if !isU′
-            Ltrisym2 = Ltrisym
-            coff = Loffset
-            for c ∈ 0:C-1
-                coff += C - c
-                push!(q.args, Expr(:(=), Symbol(:Loffset_,c), coff))
-                coff += Kmax - C
-            end
         end
         loopbody = quote end
         for r ∈ 0:Riterl
@@ -222,7 +232,7 @@ function A_rdiv_L_kernel_quote(
                 # c increase corresponds row increase
                 push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(c*size_T)))))
             else
-                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(Symbol(:Loffset_,c)) + j))))
+                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(Symbol(:Loffset_,c))+$(C*size_T) + j*$size_T))))
             end
             for r ∈ 0:Riterl
                 push!(loopbody.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_j)), $(Symbol(:L_j_,c)), $(Symbol(:A_,r,:_,c)))))
@@ -249,39 +259,44 @@ function A_rdiv_L_kernel_quote(
     # Update using just-calculated block
     finish_block = quote end
     scaleop = invdiagptr ? :vmul : :vfdiv
+    if isU′
+        Uoffset = ((K*(K-1))>>>1) + (C*K) + (((C-2)*(C-1))>>>1)
+    end
     for nj ∈ 1:C
         j = C - nj
         vLjj = Symbol(:vL_,j,:_,j)
-        push!(q.args, Expr(:(=), vLjj, :(SIMDPIrates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ldiagsym + $(size_T*j))))))
+        push!(q.args, Expr(:(=), vLjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ldiagsym + $(size_T*j))))))
         for r ∈ 0:Riterl
             push!(q.args, :($(Symbol(:A_,r,:_,j)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,j)), $vLjj)))
         end
-        if isU′ && j < C-1
-            push!(q.args, :($Ltrisym += Lstride - $j))
-        end
-        for c ∈j+1:C-1
+        for c ∈ 0:j-1
             if isU′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $(c*size_T)))))
+                push!(q.args, :($(Symbol(:L_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $((c+Uoffset)*size_T)))))
             else
-                push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $(Symbol(:Uoffset_,c)) + $(j*size_T)))))
+                push!(q.args, :($(Symbol(:L_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym + $(Symbol(:Loffset_,c)) + $((j-1)*size_T)))))
             end
             for r ∈ 0:Riterl
-                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_,j)), $(Symbol(:U_,j,:_,c)), $(Symbol(:A_,r,:_,c)))))
+                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_,j)), $(Symbol(:L_,j,:_,c)), $(Symbol(:A_,r,:_,c)))))
             end
+        end
+        if isU′
+            Uoffset -= K + j - 1
+#            push!(q.args, :($Ltrisym += $(size_T*(j+1))))
         end
     end
     push!(q.args, finish_block)
     # Store in A
-    for c ∈ 0:C-1
-        for r ∈ 0:Riter-1
-            push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
-        end
-        if Rrem > 0
-            push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+    if storeA
+        for c ∈ 0:C-1
+            for r ∈ 0:Riter-1
+                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
+            end
+            if Rrem > 0
+                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+            end
         end
     end
     q
-
 end
 

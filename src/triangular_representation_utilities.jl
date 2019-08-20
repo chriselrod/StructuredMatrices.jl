@@ -50,6 +50,18 @@ end
 end
 
 
+function lt_sub2ind(P, i, j)
+    i == j && return i
+    j, i = minmax(i, j)
+    j * P - binomial2(j) + i - j
+end
+function ut_sub2ind(P, i, j)
+    i == j && return i
+    i, j = minmax(i, j)
+    1 + P + binomial2(j) + i - j
+end
+
+
 @inline UpperTriangularMatrix(M::MutableUpperTriangularMatrix{P,T,L}) where {P,T,L} = UpperTriangularMatrix{P,T,L}(M.data)
 @generated function MutableLowerTriangularMatrix{P,T}(undef) where {P,T}
     Lbase = binomial2(P+1)
@@ -106,22 +118,22 @@ function MutableLowerTriangularMatrix(A::Matrix{T}) where {T}
     L
 end
 
-function copyto!(L::MutableUpperTriangularMatrix{M,T}, A::Matrix) where {M,T}
+function copyto!(U::MutableUpperTriangularMatrix{M,T}, A::Matrix) where {M,T}
     for m ∈ 1:M
-        L[m] = A[m,m]
+        U[m] = A[m,m]
     end
     for mc ∈ 2:M
         for mr ∈ 1:mc-1
-            L[mr,mc] = A[mr,mc]
+            U[mr,mc] = A[mr,mc]
         end
     end
 end
 function MutableUpperTriangularMatrix(A::Matrix{T}) where {T}
     M, N = size(A)
     @assert M == N
-    L = MutableUpperTriangularMatrix{M,T}(undef)
-    copyto!(L, A)
-    L
+    U = MutableUpperTriangularMatrix{M,T}(undef)
+    copyto!(U, A)
+    U
 end
 
 abstract type AbstractSymmetricMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
@@ -277,13 +289,13 @@ end
     v
 end
 @inline function Base.setindex!(A::AbstractMutableUpperTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
-    ind = lt_sub2ind(P, i, j)
+    ind = ut_sub2ind(P, i, j)
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
     v
 end
 @inline function Base.setindex!(A::AbstractMutableUpperTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
-    ind = lt_sub2ind(P, i, j)
+    ind = ut_sub2ind(P, i, j)
     @boundscheck i > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
     v
@@ -426,17 +438,6 @@ Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
 #         $(upper_triangle_sub2ind_quote(P, T))
 #     end
 # end
-
-function lt_sub2ind(P, i, j)
-    i == j && return i
-    j, i = minmax(i, j)
-    j * P - binomial2(j) + i - j
-end
-function ut_sub2ind(P, i, j)
-    i == j && return i
-    i, j = minmax(i, j)
-    1 + P + binomial2(j) + i - j
-end
 
 
 @generated function Base.:+(A::AbstractLowerTriangularMatrix{M,T,L}, B::AbstractLowerTriangularMatrix{M,T,L}) where {M,T,L}

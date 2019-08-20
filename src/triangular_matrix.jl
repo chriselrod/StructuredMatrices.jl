@@ -19,11 +19,11 @@ end
 end
 @inline function Base.getindex(S::AbstractMutableUpperTriangularMatrix{P,T,L}, i, j) where {P,T,L}
     @boundscheck i > P && ThrowBoundsError("i == $i > $P")
-    j > i && return zero(T)
+    i > j && return zero(T)
     VectorizationBase.load(pointer(S) + (ut_sub2ind(P, i, j) - 1)*sizeof(T))
 end
 @inline function Base.getindex(S::LinearAlgebra.Adjoint{Union{},<:AbstractUpperTriangularMatrix{P,Vec{W,T},L}}, i::Int, j::Int) where {P,T,L,W}
-    i < j && return zero(T)
+    j > i && return zero(T)
     ind = ut_sub2ind(P, j, i)
     @boundscheck i > L && ThrowBoundsError("ind == $ind > $L.")
     @inbounds S.parent.data[ind]

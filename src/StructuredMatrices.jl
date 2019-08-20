@@ -22,5 +22,7 @@ include("vector_of_triangular_matrix_operations.jl")
 include("autoregressive_matrix.jl")
 include("block_diagonal.jl")
 include("adjoint.jl")
+include("decompositions.jl")
+include("triangular_equations.jl")
 
 end # module

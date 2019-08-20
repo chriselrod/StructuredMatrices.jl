@@ -52,7 +52,7 @@ function cholesky_quote(
         dind += 1
     end
     # load off diagonal
-    col_offset = Mrem == 0 ? base_offset : base_offset - 1
+    col_offset = Mrem == 0 ? base_offset : base_offset + Mrem - W
     rroffset = 0
     for c ∈ 1:Mm1
         rows = M - c
@@ -70,7 +70,7 @@ function cholesky_quote(
     # S has been loaded
     # Now, start the factorization
     rroffsetcoffset = Mrem == 0 ? -1 : Wm1 - Mrem
-    col_offset = Mrem == 0 ? base_offset : base_offset - 1
+    col_offset = Mrem == 0 ? base_offset : base_offset + Mrem - W
     for couter ∈ 1:Mm1
         rroffset_outer = (couter + rroffsetcoffset) >> Wshift
         rows = M - couter
