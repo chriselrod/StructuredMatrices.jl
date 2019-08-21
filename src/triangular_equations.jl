@@ -300,3 +300,149 @@ function A_rdiv_L_kernel_quote(
     q
 end
 
+
+function div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+    necessary_loads = aloads*ncol + binomial2(ncol+1)
+    # if we load the remainder first, it has to be reloaded on all future ncolblocks
+    repeat_aloads = (colrem*ncolblock + binomial2(ncolblock)*colblock) * aloads
+    necessary_loads + repeat_aloads
+end
+function div_u_loads_crfirst(ncol, aloads, colblock)#, ncolblock = div(ncol, colblock), ncolrem = rem(ncol, colblock))
+#    if ncol == typemax(typeof(ncol))
+#        ncol = colblock
+#        ncolblock, colrem = 1, 0
+#    else
+        ncolblock, colrem = divrem(ncol, colblock)
+#    end
+    ncolblock, colrem = divrem(ncol, colblock)
+    div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+end
+function div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
+    necessary_loads = aloads*ncol + binomial2(ncol+1)
+    repeat_aloads = colblock*binomial2(ncolblock)*aloads
+    # if we load the remainder last, it has to load all (colblock*ncolblock) completed columns
+    if colrem > 0
+        repeat_aloads += aloads*colblock*ncolblock
+    end
+    necessary_loads + repeat_aloads
+end
+function div_u_loads_crlast(ncol, aloads, colblock)
+    ncolblock, colrem = divrem(ncol, colblock)
+    div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
+end
+
+function div_l_loads_crfirst(ncol, aloads, colblock)
+    div_u_loads_crlast(ncol, aloads, colblock)
+end
+function div_l_loads_crlast(ncol, aloads, colblock)
+    div_u_loads_crfirst(ncol, aloads, colblock)
+end
+
+# load from UL.
+# returns:
+# Number of loads, whehter there is a remainder
+function div_ul_loads(ncol, aloads, colblock, ncolblock, colrem)
+    ufirst = div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+    2ufirst - (aloads * colblock), colrem == 0
+end
+function div_ul_loads(ncol, aloads, colblock)
+    ncolblock, colrem = divrem(ncol, colblock)
+    div_ul_loads(ncol, aloads, colblock, ncolblock, colrem)
+end
+
+not_max(x::T) where {T} = x != typemax(T)
+function div_u_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE, verbose = false) where {T}
+    cols == typemax(typeof(cols)) && return PaddedMatrices.pick_kernel_size(T, rows, cols,  W = reg_size ÷ sizeof(T), NREG = reg_count)
+    W = div(reg_size, sizeof(T))
+    while 2rows < W
+        W >>>= 1
+    end
+    max_aloads = (reg_count >>> 1) - 1
+    ratios = Vector{Float64}(undef, max_aloads)
+    row_counts = Vector{Int}(undef, max_aloads)
+    col_counts = Vector{Int}(undef, max_aloads)
+    for aloads in 1:max_aloads
+        ncol = div(reg_count - aloads - 1, aloads)
+        loads = div_u_loads_crfirst(cols, aloads, ncol)
+        nrow = aloads * W
+        ratio = aloads / loads
+        if not_max(rows)
+            complete_rows, row_rem = divrem(rows, nrow)
+            if row_rem > 0
+                rem_aloads = cld(row_rem, W)
+                ratio = ( ratio * complete_rows * nrow + rem_aloads * row_rem / div_u_loads_crfirst(cols, rem_aloads, ncol) ) / rows
+            end
+        end
+        verbose && @show nrow, ncol, ratio
+        ratios[aloads] = ratio
+        row_counts[aloads] = nrow
+        col_counts[aloads] = ncol
+        if nrow >= rows
+            ratios[aloads+1:end] .= 0
+            break
+        end
+    end
+    bestratio, bestind = findmax(ratios)
+    W, row_counts[bestind], col_counts[bestind]
+end
+
+function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE) where {T}
+    W = div(reg_size, sizeof(T))
+    while 2rows < W
+        W >>>= 1
+    end
+    max_aloads = (reg_count >>> 1) - 1
+    ratios = Vector{Float64}(undef, max_aloads)
+    row_counts = Vector{Int}(undef, max_aloads)
+    col_counts = Vector{Int}(undef, max_aloads)
+    if not_max(cols)
+        for aloads in 1:max_aloads
+            ncol = div(reg_count - aloads - 1, aloads)
+            loads, b = div_ul_loads(cols, aloads, ncol)
+            ratio = aloads / loads
+            if not_max(rows)
+                complete_rows, row_rem = divrem(rows, nrow)
+                if row_rem > 0
+                    rem_aloads = cld(row_rem, W)
+                    rem_loads, b = div_ul_loads(cols, rem_aloads, ncol)
+                    ratio = ( ratio * complete_rows * nrow + row_rem * rem_aloads / rem_loads ) / rows
+                end
+            end
+            ratios[aloads] = ratio
+            nrow = aloads * W
+            row_counts[aloads] = nrow
+            col_counts[aloads] = ncol
+            if nrow >= rows
+                ratios[aloads+1:end] .= 0
+                break
+            end
+        end
+    else
+        for aloads in 1:max_aloads
+            ncol = div(reg_count - aloads - 1, aloads)
+            nrow = aloads * W
+            row_counts[aloads] = nrow
+            col_counts[aloads] = ncol
+            loads = aloads + ncol
+            ratios = aloads * ncol / loads
+            if not_max(rows)
+                complete_rows, row_rem = divrem(rows, nrow)
+                if row_rem > 0
+                    rem_aloads = cld(row_rem, W)
+                    ratio = ( ratio * complete_rows * nrow + row_rem * (rem_aloads * ncol) / (rem_aloads + ncol) ) / rows
+                end
+            end
+            ratios[aloads] = ratios
+            if nrow >= rows
+                ratios[aloads+1:end] .= 0
+                break
+            end
+        end
+    end
+    bestratio, bestind = findmax(ratios)
+    W, row_counts[bestind], col_counts[bestind]
+end
+
+
+
+
