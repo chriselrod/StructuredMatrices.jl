@@ -1,4 +1,4 @@
-
+using PaddedMatrices: AbstractMutableFixedSizePaddedMatrix
 ###
 ### We are solving for A in
 ### B = A * L
@@ -63,10 +63,17 @@ function A_rdiv_U_kernel_quote(
         end
     end
     if !isL′
-        coff = Ustride
-        for c ∈ 0:C-1
-            push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), coff*size_T))
-            coff += c
+        if Ustride isa Integer
+            coff = Ustride
+            for c ∈ 0:C-1
+                push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), coff*size_T))
+                coff += c
+            end
+        else
+            push!(q.args, Expr(:(=), :Uoffset_0, 0))
+            for c ∈ 1:C-1
+                push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), :($(Symbol(:Uoffset_,c-1)) + $size_T*($c+K))))
+            end
         end
     end
     # We don't need to mask these loads.
@@ -351,7 +358,7 @@ function div_ul_loads(ncol, aloads, colblock)
 end
 
 not_max(x::T) where {T} = x != typemax(T)
-function div_u_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE, verbose = false) where {T}
+function div_triangle_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE, verbose = false) where {T}
     cols == typemax(typeof(cols)) && return PaddedMatrices.pick_kernel_size(T, rows, cols,  W = reg_size ÷ sizeof(T), NREG = reg_count)
     W = div(reg_size, sizeof(T))
     while 2rows < W
@@ -441,6 +448,142 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     end
     bestratio, bestind = findmax(ratios)
     W, row_counts[bestind], col_counts[bestind]
+end
+
+function A_div_U_rowiter(
+    Mk, Nk, col_rem, T, CP, AP, n_col_reps
+)
+    size_T = sizeof(T)
+    if col_rem > 0
+        row_iter = A_rdiv_U_kernel_quote(
+            Mk, col_rem, 0, T, CP, AP, 0, false, true
+        )
+        push!(row_iter.args, :(ptrUtri += (binomial2(col_rem)*size_T)))
+        push!(row_iter.args, :(ptrUdiag += $(col_rem*size_T)))
+        base_K = col_rem
+    else
+        row_iter = quote end
+        base_K = 0
+    end
+    if n_col_reps > 1
+        iterquote = A_rdiv_U_kernel_quote(
+            Mk, Nk, :K, T, CP, AP, :K, false, true
+        )
+        row_iter_loop = quote
+            K = $base_K
+            for crep ∈ 0:$(n_col_reps-1)
+                $iterquote
+                ptrUtri += $(size_T*binomial2(Nk)) + $(size_T*Nk)*K
+                ptrUdiag += $(size_T*Nk)
+                K += $Nk
+            end
+        end
+        push!(row_iter.args, row_iter_loop)
+    elseif n_col_reps == 1
+        row_iter_single = A_rdiv_U_kernel_quote(
+            Mk, Nk, 0, T, CP, AP, 0, false, true
+        )
+        push!(row_iter.args, row_iter_single)
+    end
+    row_iter
+end
+function A_rdiv_U_quote(
+    M, N, T, CP, AP, NBL
+)
+    # W = vector width
+    # Mk = kernel rows
+    # Nk = kernel colums
+    W, Mk, Nk = div_triangle_blocking_structure(M, N, T)
+    Wm1 = W - 1
+    n_row_reps, row_rem = divrem(M, Mk)
+    total_row_iterations = n_row_reps + (row_rem > 0)
+    n_col_reps, col_rem = divrem(N, Nk)
+    total_col_iterations = n_col_reps + (col_rem > 0)
+    Nl = ( N + W - 1 ) & ~W
+    Nl = Nl > NBL ? N : Nl # Don't segfault
+    size_T = sizeof(T)
+    q = quote
+        invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
+        @vvectorize $T for n ∈ 1:$Nl
+            invdiag[n] = one($T) / B[n]
+        end
+        ptrUdiag = pointer(invdiag)
+        ptrUtri = pointer(B) + $(size_T * N)
+        ptrB = pointer(A)
+        ptrA = pointer(C)
+    end
+    Mk1 = n_row_reps == 0 ? row_rem : Mk
+    row_iter = A_div_U_rowiter(
+        Mk1, Nk, col_rem, T, CP, AP, n_col_reps
+    )
+    if n_row_reps > 1
+        row_loops = quote
+            for rrep ∈ 1:$n_row_reps
+                $row_iter
+                ptrB += $(size_T*Mk)
+                ptrA += $(size_T*Mk)
+            end
+        end
+        push!(q.args, row_loops)
+    else
+        push!(q.args, row_iter)
+        if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
+            push!(q.args, A_div_U_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
+        end
+    end
+    q    
+end
+@generated function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    B::AbstractUpperTriangularMatrix{N,T,NBL}
+) where {M,N,T,NBL,CP,AP}
+    A_rdiv_U_quote(M, N, T, CP, AP, NBL)
+end
+
+
+function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    B::AbstractLowerTriangularMatrix{N,T}
+) where {M,N,T}
+    
+end
+
+
+function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    B::Adjoint{T,<:AbstractUpperTriangularMatrix{N,T}}
+) where {M,N,T}
+
+end
+
+
+function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    B::Adjoint{T,<:AbstractLowerTriangularMatrix{N,T}}
+) where {M,N,T}
+
+end
+
+
+function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    B::AbstractSymmetricMatrixU{N,T}
+) where {M,N,T}
+
+end
+
+
+function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    B::AbstractSymmetricMatrixL{N,T}
+) where {M,N,T}
+
 end
 
 
