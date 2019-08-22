@@ -27,7 +27,7 @@ function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Ustride, isL′, invdiagptr,
     Bsym = :ptrB, Asym = :ptrA, Utrisym = :ptrUtri, Udiagsym = :ptrUdiag,
-    maskload = true, loadB = true, storeA = true; KmaybeZero::Bool = true
+    maskload = true, loadB = true, storeA = true
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
@@ -108,15 +108,7 @@ function A_rdiv_U_kernel_quote(
             end
         end
         push!(q.args, mainloop)
-        #if isL′
-        #    if K isa Symbol && KmaybeZero
-        #        push!(q.args, :($K > 0 && (ptrUtri += $size_T)))
-        #    else
-        #        push!(q.args, :(ptrUtri += $size_T))
-        #    end
-        #end
     end
-
     # Update using just-calculated block
     scaleop = invdiagptr ? :vmul : :vfdiv
     if isL′
@@ -182,40 +174,33 @@ end
 # ptr and Lstride is so that the first of the reverse iterations has offset 0
 # K is the amount of preceding columns.
 function A_rdiv_L_kernel_quote(
-    R, C, K::Union{Symbol,Integer}, Kmax::Union{Symbol,Integer}, ::Type{T},
-    Astride, Bstride, Lstride, isU′, invdiagptr,
+    R, C, Kmax::Union{Symbol,Integer}, ::Type{T},
+    Astride, Bstride, isU′, invdiagptr,
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
     maskload = true, loadB = true, storeA = true
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
+    if isU′
+        K = Kmax
+    end
     W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
     Wm1 = W - 1
     Riter = R >> Wshift
     Rrem = R & Wm1
     mask = VectorizationBase.mask_from_remainder(T, Rrem)
     if loadB
-        if K isa Symbol
-            q = quote
-                BsymK = $Bsym + $(size_T*Bstride)*$K
-                AsymK = $Asym + $(size_T*Astride)*$K
-            end
-        else
-            q = quote
-                BsymK = $Bsym + $(size_T*Bstride*K)
-                AsymK = $Asym + $(size_T*Astride*K)
-            end
-        end
+        q = quote end
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
-                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) ) ))
+                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (r*W + c*Bstride)) ) ))
             end
             if Rrem > 0
                 # Only need to mask if we're on last column
                 if maskload && c == C-1
-                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
+                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
                 else
-                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (Riter*W + c*Bstride)) ) ))
                 end
             end
         end
@@ -224,14 +209,25 @@ function A_rdiv_L_kernel_quote(
     Riterl = Rrem > 0 ? Riter : Riter-1
     if !isU′
         Ltrisym2 = Ltrisym
-        coff = Lstride
+        coff = 0
         for c ∈ 0:C-1
-            push!(q.args, Expr(:(=), Symbol(:Loffset_,c), coff*size_T))
-            coff += Lstride - c - 2
+            if Kmax isa Symbol
+                #push!(q.args, Expr(:(=), Symbol(:Loffset_,c), :($(2c*size_T)*$Kmax + $((coff-2c*C)*size_T))))
+                #coff -=  c + 2
+                if c == 0
+                    push!(q.args, Expr(:(=), Symbol(:Loffset_,c), 0  ))
+                else
+                    push!(q.args, Expr(:(=), Symbol(:Loffset_,c), :($Kmax*$(c*size_T) - $(coff*size_T))  ))
+                end
+                coff += c + 2
+            else
+                push!(q.args, Expr(:(=), Symbol(:Loffset_,c), size_T * (Kmax * c - coff)))
+                coff += c + 2
+            end
         end
     end
     # Updating based on all earlier columns
-    if K isa Symbol || Kmax isa Symbol || (K + C < Kmax)
+    if Kmax isa Symbol || (C < Kmax)
         if isU′
             Ltrisym2 = Symbol(:Ltrisym, 2)
             CtriL = (C*(C+1)) >> 1
@@ -244,10 +240,13 @@ function A_rdiv_L_kernel_quote(
                 #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + $(((KpC*(KpC+1))>>1)-((K*(K+1))>>1)))))
                 push!(q.args, Expr(:(=), Ltrisym2, :($(CtriL + K*C))))
             end
+        else
+            push!(q.args, Expr(:(=), :ptrAloop, :($Asym + C*Astride*size_T)))
+            push!(q.args, Expr(:(=), :Ltripointer2, :($Ltrisym2 + $((C-1)*size_T))))
         end
         loopbody = quote end
         for r ∈ 0:Riterl
-            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + j*$(Astride*size_T) + $(r*W))))
+            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, ptrAloop + j*$(Astride*size_T) + $(r*W*size_T))))
         end
         if isU′
             push!(loopbody.args, :($Ltrisym += j))
@@ -257,14 +256,19 @@ function A_rdiv_L_kernel_quote(
                 # c increase corresponds row increase
                 push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(c*size_T)))))
             else
-                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Ltrisym2 + $(Symbol(:Loffset_,c))+$(C*size_T) + j*$size_T))))
+                push!(loopbody.args, :($(Symbol(:L_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load(Ltripointer2 + $(Symbol(:Loffset_,c)) + j*$size_T))))
             end
             for r ∈ 0:Riterl
                 push!(loopbody.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_j)), $(Symbol(:L_j_,c)), $(Symbol(:A_,r,:_,c)))))
             end
         end
-        jloopstart = K isa Symbol ? :($K - C) : K - C
-        jloopend = Kmax isa Symbol ? :($Kmax - 1) : Kmax - 1
+        if isU′
+            jloopstart = K isa Symbol ? :($K - $C) : K - C
+            jloopend = Kmax isa Symbol ? :($Kmax - 1) : Kmax - 1
+        else
+            jloopstart = 0#C-1
+            jloopend = Kmax isa Symbol ? :($Kmax - $(C-1)) : Kmax - C - 1
+        end
         mainloop = quote
             @inbounds for j ∈ $jloopstart:$jloopend
                 $loopbody
@@ -315,10 +319,10 @@ function A_rdiv_L_kernel_quote(
     if storeA
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
-                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
+                push!(q.args, :( SIMDPirates.vstore!( $Asym + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
             end
             if Rrem > 0
-                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+                push!(q.args, :( SIMDPirates.vstore!( $Asym + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
             end
         end
     end
@@ -326,13 +330,13 @@ function A_rdiv_L_kernel_quote(
 end
 
 
-function div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+function div_triangle_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
     necessary_loads = aloads*ncol + binomial2(ncol+1)
     # if we load the remainder first, it has to be reloaded on all future ncolblocks
     repeat_aloads = (colrem*ncolblock + binomial2(ncolblock)*colblock) * aloads
     necessary_loads + repeat_aloads
 end
-function div_u_loads_crfirst(ncol, aloads, colblock)#, ncolblock = div(ncol, colblock), ncolrem = rem(ncol, colblock))
+function div_triangle_loads_crfirst(ncol, aloads, colblock)#, ncolblock = div(ncol, colblock), ncolrem = rem(ncol, colblock))
 #    if ncol == typemax(typeof(ncol))
 #        ncol = colblock
 #        ncolblock, colrem = 1, 0
@@ -342,7 +346,7 @@ function div_u_loads_crfirst(ncol, aloads, colblock)#, ncolblock = div(ncol, col
     ncolblock, colrem = divrem(ncol, colblock)
     div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
 end
-function div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
+function div_triangle_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
     necessary_loads = aloads*ncol + binomial2(ncol+1)
     repeat_aloads = colblock*binomial2(ncolblock)*aloads
     # if we load the remainder last, it has to load all (colblock*ncolblock) completed columns
@@ -351,24 +355,25 @@ function div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
     end
     necessary_loads + repeat_aloads
 end
-function div_u_loads_crlast(ncol, aloads, colblock)
+function div_triangle_loads_crlast(ncol, aloads, colblock)
     ncolblock, colrem = divrem(ncol, colblock)
     div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
 end
 
-function div_l_loads_crfirst(ncol, aloads, colblock)
-    div_u_loads_crlast(ncol, aloads, colblock)
-end
-function div_l_loads_crlast(ncol, aloads, colblock)
-    div_u_loads_crfirst(ncol, aloads, colblock)
-end
 
-# load from UL.
 # returns:
-# Number of loads, whehter there is a remainder
+# Number of loads, whether there is a remainder
 function div_ul_loads(ncol, aloads, colblock, ncolblock, colrem)
-    ufirst = div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
-    2ufirst - (aloads * colblock), colrem == 0
+    tfirst = div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+    twotfirst = tfirst + tfirst
+    if colrem == 0
+        twotfirst - (aloads * colblock), true, false
+    else
+        tlast = div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
+        alt_strat = tfirst + tlast - (aloads * colblock)
+        primary_strat = twotfirst - (aloads * colrem)
+        min(primary_strat, alt_strat), false, alt_strat < primary_strat
+    end
 end
 function div_ul_loads(ncol, aloads, colblock)
     ncolblock, colrem = divrem(ncol, colblock)
@@ -388,14 +393,14 @@ function div_triangle_blocking_structure(rows = typemax(UInt), cols = typemax(UI
     col_counts = Vector{Int}(undef, max_aloads)
     for aloads in 1:max_aloads
         ncol = div(reg_count - aloads - 1, aloads)
-        loads = div_u_loads_crfirst(cols, aloads, ncol)
+        loads = div_triangle_loads_crfirst(cols, aloads, ncol)
         nrow = aloads * W
         ratio = aloads / loads
         if not_max(rows)
             complete_rows, row_rem = divrem(rows, nrow)
             if row_rem > 0
                 rem_aloads = cld(row_rem, W)
-                ratio = ( ratio * complete_rows * nrow + rem_aloads * row_rem / div_u_loads_crfirst(cols, rem_aloads, ncol) ) / rows
+                ratio = ( ratio * complete_rows * nrow + rem_aloads * row_rem / div_triangle_loads_crfirst(cols, rem_aloads, ncol) ) / rows
             end
         end
         verbose && @show nrow, ncol, ratio
@@ -420,16 +425,18 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     ratios = Vector{Float64}(undef, max_aloads)
     row_counts = Vector{Int}(undef, max_aloads)
     col_counts = Vector{Int}(undef, max_aloads)
+    strategy = Vector{Tuple{Bool,Bool}}(undef, max_aloads)
     if not_max(cols)
         for aloads in 1:max_aloads
             ncol = div(reg_count - aloads - 1, aloads)
-            loads, b = div_ul_loads(cols, aloads, ncol)
+            loads, b1, b2 = div_ul_loads(cols, aloads, ncol)
+            strategy[aloads] = (b1,b2)
             ratio = aloads / loads
             if not_max(rows)
                 complete_rows, row_rem = divrem(rows, nrow)
                 if row_rem > 0
                     rem_aloads = cld(row_rem, W)
-                    rem_loads, b = div_ul_loads(cols, rem_aloads, ncol)
+                    rem_loads, b1, b2 = div_ul_loads(cols, rem_aloads, ncol)
                     ratio = ( ratio * complete_rows * nrow + row_rem * rem_aloads / rem_loads ) / rows
                 end
             end
@@ -465,7 +472,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
         end
     end
     bestratio, bestind = findmax(ratios)
-    W, row_counts[bestind], col_counts[bestind]
+    W, row_counts[bestind], col_counts[bestind], strategy[bestind]
 end
 
 function A_div_U_rowiter(
@@ -585,7 +592,7 @@ function A_div_L′_rowiter(
     end
     if n_col_reps > 1
         iterquote = A_rdiv_U_kernel_quote(
-            Mk, Nk, :K, T, CP, AP, N, true, true, KmaybeZero = KmZ
+            Mk, Nk, :K, T, CP, AP, N, true, true
         )
         row_iter_loop = quote
             K = $base_K
@@ -599,7 +606,7 @@ function A_div_L′_rowiter(
         push!(row_iter.args, row_iter_loop)
     elseif n_col_reps == 1
         row_iter_single = A_rdiv_U_kernel_quote(
-            Mk, Nk, 0, T, CP, AP, 0, true, true
+            Mk, Nk, col_rem, T, CP, AP, N, true, true
         )
         push!(row_iter.args, row_iter_single)
     end
@@ -668,15 +675,106 @@ end
 end
 
 
-function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    B::Adjoint{T,<:AbstractUpperTriangularMatrix{N,T}}
-) where {M,N,T,CP,AP,NBL}
-#) where {M,N,T,NBL,CP,AP}
 
+
+function A_div_L_rowiter(
+    Mk, Nk, col_rem, T, CP, AP, n_col_reps
+)
+    N = Nk * n_col_reps + col_rem
+    size_T = sizeof(T)
+    if col_rem > 0
+        row_iter = A_rdiv_L_kernel_quote(
+            Mk, col_rem, col_rem, T, CP, AP, false, true
+        )
+        #pushfirst!(row_iter.args, :(ptrUtri = ptrUtribase))
+        fullcols = Nk * n_col_reps
+        # handle following in A_rdiv_L_quote
+#        pushfirst!(row_iter.args, :(ptrA = pointer(A) + $(CP*fullcols*size_T)))
+#        pushfirst!(row_iter.args, :(ptrB = pointer(B) + $(AP*fullcols*size_T)))
+        push!(row_iter.args, :(ptrLdiag -= $(col_rem*size_T)))
+        base_K = col_rem
+        KmZ = false
+    else
+        row_iter = quote end
+        base_K = 0
+        KmZ = true
+    end
+    if n_col_reps > 1
+        iterquote = A_rdiv_L_kernel_quote(
+            Mk, Nk, :K, T, CP, AP, false, true
+        )
+        row_iter_loop = quote
+            K = $col_rem
+            for crep ∈ 0:$(n_col_reps-1)
+                ptrA -= $(NK*CP*size_T)
+                ptrB -= $(Nk*AP*size_T)
+                ptrLtri -= $(size_T*(Nk*K + binomial2(Nk)))  # = ptrLtribase + K*$size_T
+                K += $Nk
+                $iterquote
+                ptrLdiag -= $(size_T*Nk)
+                K += $Nk
+            end
+        end
+        push!(row_iter.args, row_iter_loop)
+    elseif n_col_reps == 1
+        row_iter_single = A_rdiv_L_kernel_quote(
+            Mk, Nk, N, T, CP, AP, false, true
+        )
+        push!(row_iter.args, row_iter_single)
+    end
+    row_iter
 end
-
+function A_rdiv_L_quote(
+    M, N, T, CP, AP, NBL
+)
+    # W = vector width
+    # Mk = kernel rows
+    # Nk = kernel colums
+    W, Mk, Nk = div_triangle_blocking_structure(M, N, T)
+    Wm1 = W - 1
+    n_row_reps, row_rem = divrem(M, Mk)
+    total_row_iterations = n_row_reps + (row_rem > 0)
+    n_col_reps, col_rem = divrem(N, Nk)
+    total_col_iterations = n_col_reps + (col_rem > 0)
+    Nl = ( N + W - 1 ) & ~W
+    Nl = Nl > NBL ? N : Nl # Don't segfault
+    size_T = sizeof(T)
+    q = quote
+        B = Badj.parent
+        invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
+        LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
+            invdiag[n] = one($T) / B[n]
+        end
+        ptrB = pointer(A)
+        ptrA = pointer(C)
+        ptrUtribase = pointer(B) + $(N*size_T)
+    end
+    Mk1 = n_row_reps == 0 ? row_rem : Mk
+    row_iter = A_div_L_rowiter(
+        Mk1, Nk, col_rem, T, CP, AP, n_col_reps
+    )
+    if n_row_reps > 1
+        row_loops = quote
+            for rrep ∈ 1:$n_row_reps
+                ptrUdiag = pointer(invdiag)
+                ptrUtri = pointer(B) + $(size_T * N)
+                $row_iter
+                ptrB += $(size_T*Mk)
+                ptrA += $(size_T*Mk)
+            end
+        end
+        push!(q.args, row_loops)
+    else
+        push!(q.args, :(ptrUdiag = pointer(invdiag)))
+        push!(q.args, :(ptrUtri = ptrUtribase))
+        push!(q.args, row_iter)
+        if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
+            push!(q.args, A_div_L_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
+        end
+    end
+    push!(q.args, :C)
+    q    
+end
 
 function A_rdiv_B!(
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
@@ -684,7 +782,19 @@ function A_rdiv_B!(
     B::AbstractLowerTriangularMatrix{N,T,NBL}
 ) where {M,N,T,CP,AP,NBL}
 #) where {M,N,T,NBL,CP,AP}
-    
+    A_rdiv_L_quote(
+        M, N, T, CP, AP, NBL
+    )
+end
+
+
+function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    B::Adjoint{T,<:AbstractUpperTriangularMatrix{N,T}}
+) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
+
 end
 
 
