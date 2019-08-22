@@ -27,7 +27,7 @@ function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Ustride, isL′, invdiagptr,
     Bsym = :ptrB, Asym = :ptrA, Utrisym = :ptrUtri, Udiagsym = :ptrUdiag,
-    maskload = true, loadB = true, storeA = true
+    maskload = true, loadB = true, storeA = true; KmaybeZero::Bool = true
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
@@ -71,8 +71,8 @@ function A_rdiv_U_kernel_quote(
             end
         else
             push!(q.args, Expr(:(=), :Uoffset_0, 0))
-            for c ∈ 1:C-1
-                push!(q.args, Expr(:(=), Symbol(:Uoffset_,c), :($(Symbol(:Uoffset_,c-1)) + $size_T*($c+K))))
+            for c ∈ 0:C-2
+                push!(q.args, Expr(:(=), Symbol(:Uoffset_,c+1), :($(Symbol(:Uoffset_,c)) + $size_T*($c+K))))
             end
         end
     end
@@ -84,18 +84,22 @@ function A_rdiv_U_kernel_quote(
         for r ∈ 0:Riterl
             push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + j*$(Astride*size_T) + $(r*W*size_T))))
         end
-        if isL′
-            push!(loopbody.args, :($Utrisym += $Ustride - j))
-        end
         for c ∈ 0:C-1
             if isL′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
-                push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(c*size_T)))))
+                push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $((c-1)*size_T)))))
             else
                 push!(loopbody.args, :($(Symbol(:U_j_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + (j*$size_T)))))
             end
             for r ∈ 0:Riterl
                 push!(loopbody.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_j)), $(Symbol(:U_j_,c)), $(Symbol(:A_,r,:_,c)))))
+            end
+        end
+        if isL′
+            if Ustride isa Symbol
+                push!(loopbody.args, :($Utrisym += $size_T * ($Ustride - j - 2)))
+            else
+                push!(loopbody.args, :($Utrisym += $size_T * ($(Ustride-2) - j)))
             end
         end
         mainloop = quote
@@ -104,22 +108,36 @@ function A_rdiv_U_kernel_quote(
             end
         end
         push!(q.args, mainloop)
+        #if isL′
+        #    if K isa Symbol && KmaybeZero
+        #        push!(q.args, :($K > 0 && (ptrUtri += $size_T)))
+        #    else
+        #        push!(q.args, :(ptrUtri += $size_T))
+        #    end
+        #end
     end
 
     # Update using just-calculated block
     scaleop = invdiagptr ? :vmul : :vfdiv
     if isL′
-        trioff = 0
+        trioff = 0#size_T
+        #push!(q.args, :(ptrUtr -= $size_T))
     end
-    for j ∈ 0:C-1
-        vUjj = Symbol(:vU_,j,:_,j)
-        push!(q.args, Expr(:(=), vUjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Udiagsym + $(size_T*j))))))
-        for r ∈ 0:Riterl
-            push!(q.args, :($(Symbol(:A_,r,:_,j)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,j)), $vUjj)))
+    for j ∈ 0:C-2
+        if j == 0
+            vUjj = Symbol(:vU_,j,:_,j)
+            push!(q.args, Expr(:(=), vUjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Udiagsym + $(size_T*j))))))
+            for r ∈ 0:Riterl
+                push!(q.args, :($(Symbol(:A_,r,:_,j)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,j)), $vUjj)))
+            end
         end
-        if isL′ && j < C-1 && j > 0
+        if isL′ && j > 0
             if K isa Symbol
-                push!(q.args, :($Utrisym += $size_T*($(Ustride - j) - $K)))
+                if Ustride isa Symbol
+                    push!(q.args, :($Utrisym += $size_T*($Ustride - $K - $j)))
+                else
+                    push!(q.args, :($Utrisym += $size_T*($(Ustride-j) - $K)))
+                end
             else
                 trioff += size_T*(Ustride - K - j)
             end
@@ -127,6 +145,7 @@ function A_rdiv_U_kernel_quote(
         for c ∈ j+1:C-1
             if isL′ # U is actually a transposed lower triangular matrix
                 # c increase corresponds row increase
+                #push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $((c-1-j)*size_T + trioff)))))
                 push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $((c-1-j)*size_T + trioff)))))
             else
                 push!(q.args, :($(Symbol(:U_,j,:_,c)) = SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Utrisym + $(Symbol(:Uoffset_,c)) + $(K isa Symbol ? :($size_T*($K+$j)) : size_T*(K+j) )))))
@@ -134,7 +153,17 @@ function A_rdiv_U_kernel_quote(
             for r ∈ 0:Riterl
                 push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vfnmadd($(Symbol(:A_,r,:_,j)), $(Symbol(:U_,j,:_,c)), $(Symbol(:A_,r,:_,c)))))
             end
+            if c == j+1
+                vUjj = Symbol(:vU_,c,:_,c)
+                push!(q.args, Expr(:(=), vUjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Udiagsym + $(size_T*c))))))
+                for r ∈ 0:Riterl
+                    push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,c)), $vUjj)))
+                end
+            end
         end
+        #if j == 0 && isL′
+        #    trioff -= size_T
+        #end
     end
     # Store in A
     if storeA
@@ -149,17 +178,6 @@ function A_rdiv_U_kernel_quote(
     end
     q
 end
-function A_rdiv_U_quote(K::Union{Symbol,Integer}, ::Type{T}) where {T}
-
-
-end
-
-function A_rdiv_L_quote()
-
-
-end
-
-
 
 # ptr and Lstride is so that the first of the reverse iterations has offset 0
 # K is the amount of preceding columns.
@@ -504,11 +522,9 @@ function A_rdiv_U_quote(
     size_T = sizeof(T)
     q = quote
         invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
-        @vvectorize $T for n ∈ 1:$Nl
+        LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
-        ptrUdiag = pointer(invdiag)
-        ptrUtri = pointer(B) + $(size_T * N)
         ptrB = pointer(A)
         ptrA = pointer(C)
     end
@@ -519,6 +535,8 @@ function A_rdiv_U_quote(
     if n_row_reps > 1
         row_loops = quote
             for rrep ∈ 1:$n_row_reps
+                ptrUdiag = pointer(invdiag)
+                ptrUtri = pointer(B) + $(size_T * N)
                 $row_iter
                 ptrB += $(size_T*Mk)
                 ptrA += $(size_T*Mk)
@@ -526,11 +544,14 @@ function A_rdiv_U_quote(
         end
         push!(q.args, row_loops)
     else
+        push!(q.args, :(ptrUdiag = pointer(invdiag)))
+        push!(q.args, :(ptrUtri = pointer(B) + $(size_T * N)))
         push!(q.args, row_iter)
         if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
             push!(q.args, A_div_U_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
         end
     end
+    push!(q.args, :C)
     q    
 end
 @generated function A_rdiv_B!(
@@ -538,16 +559,112 @@ end
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
     B::AbstractUpperTriangularMatrix{N,T,NBL}
 ) where {M,N,T,NBL,CP,AP}
+#) where {M,N,T,CP,AP,NBL}
     A_rdiv_U_quote(M, N, T, CP, AP, NBL)
 end
 
 
-function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    B::AbstractLowerTriangularMatrix{N,T}
-) where {M,N,T}
-    
+
+function A_div_L′_rowiter(
+    Mk, Nk, col_rem, T, CP, AP, n_col_reps
+)
+    N = Nk * n_col_reps + col_rem
+    size_T = sizeof(T)
+    if col_rem > 0
+        row_iter = A_rdiv_U_kernel_quote(
+            Mk, col_rem, 0, T, CP, AP, N, true, true
+        )
+        #pushfirst!(row_iter.args, :(ptrUtri = ptrUtribase))
+        push!(row_iter.args, :(ptrUdiag += $(col_rem*size_T)))
+        base_K = col_rem
+        KmZ = false
+    else
+        row_iter = quote end
+        base_K = 0
+        KmZ = true
+    end
+    if n_col_reps > 1
+        iterquote = A_rdiv_U_kernel_quote(
+            Mk, Nk, :K, T, CP, AP, N, true, true, KmaybeZero = KmZ
+        )
+        row_iter_loop = quote
+            K = $base_K
+            for crep ∈ 0:$(n_col_reps-1)
+                ptrUtri = ptrUtribase + K*$size_T
+                $iterquote
+                ptrUdiag += $(size_T*Nk)
+                K += $Nk
+            end
+        end
+        push!(row_iter.args, row_iter_loop)
+    elseif n_col_reps == 1
+        row_iter_single = A_rdiv_U_kernel_quote(
+            Mk, Nk, 0, T, CP, AP, 0, true, true
+        )
+        push!(row_iter.args, row_iter_single)
+    end
+    row_iter
+end
+function A_rdiv_L′_quote(
+    M, N, T, CP, AP, NBL
+)
+    # W = vector width
+    # Mk = kernel rows
+    # Nk = kernel colums
+    W, Mk, Nk = div_triangle_blocking_structure(M, N, T)
+    Wm1 = W - 1
+    n_row_reps, row_rem = divrem(M, Mk)
+    total_row_iterations = n_row_reps + (row_rem > 0)
+    n_col_reps, col_rem = divrem(N, Nk)
+    total_col_iterations = n_col_reps + (col_rem > 0)
+    Nl = ( N + W - 1 ) & ~W
+    Nl = Nl > NBL ? N : Nl # Don't segfault
+    size_T = sizeof(T)
+    q = quote
+        B = Badj.parent
+        invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
+        LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
+            invdiag[n] = one($T) / B[n]
+        end
+        ptrB = pointer(A)
+        ptrA = pointer(C)
+        ptrUtribase = pointer(B) + $(N*size_T)
+    end
+    Mk1 = n_row_reps == 0 ? row_rem : Mk
+    row_iter = A_div_L′_rowiter(
+        Mk1, Nk, col_rem, T, CP, AP, n_col_reps
+    )
+    if n_row_reps > 1
+        row_loops = quote
+            for rrep ∈ 1:$n_row_reps
+                ptrUdiag = pointer(invdiag)
+                ptrUtri = pointer(B) + $(size_T * N)
+                $row_iter
+                ptrB += $(size_T*Mk)
+                ptrA += $(size_T*Mk)
+            end
+        end
+        push!(q.args, row_loops)
+    else
+        push!(q.args, :(ptrUdiag = pointer(invdiag)))
+        push!(q.args, :(ptrUtri = ptrUtribase))
+        push!(q.args, row_iter)
+        if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
+            push!(q.args, A_div_L′_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
+        end
+    end
+    push!(q.args, :C)
+    q    
+end
+@generated function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    Badj::Adjoint{T,<:AbstractLowerTriangularMatrix{N,T,NBL}}
+) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
+    A_rdiv_L′_quote(
+        M, N, T, CP, AP, NBL
+    )
 end
 
 
@@ -555,17 +672,19 @@ function A_rdiv_B!(
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
     B::Adjoint{T,<:AbstractUpperTriangularMatrix{N,T}}
-) where {M,N,T}
+) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
 
 end
 
 
 function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    B::Adjoint{T,<:AbstractLowerTriangularMatrix{N,T}}
-) where {M,N,T}
-
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    B::AbstractLowerTriangularMatrix{N,T,NBL}
+) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
+    
 end
 
 
@@ -573,7 +692,8 @@ function A_rdiv_B!(
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
     B::AbstractSymmetricMatrixU{N,T}
-) where {M,N,T}
+) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
 
 end
 
@@ -582,7 +702,8 @@ function A_rdiv_B!(
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
     B::AbstractSymmetricMatrixL{N,T}
-) where {M,N,T}
+) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
 
 end
 
