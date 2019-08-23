@@ -25,41 +25,69 @@ using PaddedMatrices: AbstractMutableFixedSizePaddedMatrix
 # K is number of earlier iterations
 function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
-    Astride, Bstride, Ustride, isL′, invdiagptr,
+    Astride, Bstride, Ustride, isL′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Utrisym = :ptrUtri, Udiagsym = :ptrUdiag,
-    maskload = true, loadB = true, storeA = true
+    maskload = true, loadB = true, storeA = true, reduce_sym::Union{Symbol,Nothing} = nothing
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
-    W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
-    Wm1 = W - 1
-    Riter = R >> Wshift
-    Rrem = R & Wm1
-    mask = VectorizationBase.mask_from_remainder(T, Rrem)
+    if R isa Integer
+        W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
+        Wm1 = W - 1
+        Riter = R >> Wshift
+        Rrem = R & Wm1
+        mask = VectorizationBase.mask_from_remainder(T, Rrem)
+    else # We assume this is meant to handle a single vector remainder
+        W, Wshift = VectorizationBase.pick_vector_width_shift(T)
+        Wm1 = W - 1
+        Riter = 0
+        Rrem = 1
+        mask = :(VectorizationBase.mask_from_remainder($T, $R & $Wm1))
+    end
+    q = quote end
     if loadB
-        if K isa Symbol
-            q = quote
-                BsymK = $Bsym + $(size_T*Bstride)*$K
-                AsymK = $Asym + $(size_T*Astride)*$K
-            end
+        if K isa Symbol && Bstride isa Symbol
+            push!(q.args, :( BsymK = $Bsym + $size_T * $Bstride * $K ))
+        elseif K isa Symbol
+            push!(q.args, :( BsymK = $Bsym + $(size_T*Bstride)*$K ))
+        elseif Bstride isa Symbol
+            push!(q.args, :( BsymK = $Bsym + $(size_T*K)*$Bstride ))
         else
-            q = quote
-                BsymK = $Bsym + $(size_T*Bstride*K)
-                AsymK = $Asym + $(size_T*Astride*K)
-            end
+            push!(q.args, :( BsymK = $Bsym + $(size_T*Bstride*K) ))
         end
         for c ∈ 0:C-1
-            for r ∈ 0:Riter-1
-                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) ) ))
-            end
-            if Rrem > 0
-                # Only need to mask if we're on last column
-                if maskload && c == C-1
-                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
-                else
-                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+            if Bstride isa Symbol
+                for r ∈ 0:Riter-1
+                    push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W)) + $(c*size_T)*$Bstride)) )
+                end
+                if Rrem > 0
+                    # Only need to mask if we're on last column
+                    if maskload && c == C-1
+                        push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W)) + $(c*size_T)*$Bstride, $mask )))
+                    else
+                        push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W)) + $(c*size_T)*$Bstride )))
+                    end
+                end
+            else
+                for r ∈ 0:Riter-1
+                    push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (r*W + c*Bstride)) )))
+                end
+                if Rrem > 0
+                    # Only need to mask if we're on last column
+                    if maskload && c == C-1
+                        push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
+                    else
+                        push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, BsymK + $(size_T * (Riter*W + c*Bstride)) ) ))
+                    end
                 end
             end
+        end
+    end
+    if storeA
+        if K isa Symbol
+            push!(q.args, :(AsymK = $Asym + $(size_T*Astride)*$K))
+        else
+            push!(q.args, :(AsymK = $Asym + $(size_T*Astride*K)))
         end
     end
     if !isL′
@@ -120,7 +148,28 @@ function A_rdiv_U_kernel_quote(
             vUjj = Symbol(:vU_,j,:_,j)
             push!(q.args, Expr(:(=), vUjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Udiagsym + $(size_T*j))))))
             for r ∈ 0:Riterl
-                push!(q.args, :($(Symbol(:A_,r,:_,j)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,j)), $vUjj)))
+                Arj = Symbol(:A_,r,:_0)
+                push!(q.args, Expr(:(=), Arj, :(SIMDPirates.$scaleop($Arj, $vUjj))))
+            end
+            # if storeA
+            #     for r ∈ 0:Riter-1
+            #         push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W)), $(Symbol(:A_,r,:_0)) ) ))
+            #     end
+            #     if Rrem > 0
+            #         push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W)), $(Symbol(:A_,Riter,:_0)), $mask ) ))
+            #     end
+            # end
+            if reduce_sym isa Symbol
+                for r ∈ 0:Riter-1
+                    Arj = Symbol(:A_,r,:_0)
+                    reduce_r = Symbol(reduce_sym, :_, r)
+                    push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vmuladd($Arj, $Arj, $reduce_r))))
+                end
+                if Rrem > 0
+                    Arj = Symbol(:A_,Riter,:_0)
+                    reduce_r = Symbol(reduce_sym, :_, Riter)
+                    push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vifelse($mask, SIMDPirates.vmuladd($Arj,$Arj,$reduce_r),$reduce_r))))
+                end
             end
         end
         if isL′ && j > 0
@@ -151,13 +200,34 @@ function A_rdiv_U_kernel_quote(
                 for r ∈ 0:Riterl
                     push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.$scaleop($(Symbol(:A_,r,:_,c)), $vUjj)))
                 end
+                # if storeA
+                #     for r ∈ 0:Riter-1
+                #         push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
+                #     end
+                #     if Rrem > 0
+                #         push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+                #     end
+                # end
+                if reduce_sym isa Symbol
+                    for r ∈ 0:Riter-1
+                        Arj = Symbol(:A_,r,:_,c)
+                        reduce_r = Symbol(reduce_sym, :_, r)
+                        push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vmuladd($Arj, $Arj, $reduce_r))))
+                    end
+                    if Rrem > 0
+                        Arj = Symbol(:A_,Riter,:_,c)
+                        reduce_r = Symbol(reduce_sym, :_, Riter)
+                        push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vifelse($mask, SIMDPirates.vmuladd($Arj,$Arj,$reduce_r), $reduce_r))))
+                    end
+                end
             end
         end
         #if j == 0 && isL′
         #    trioff -= size_T
         #end
     end
-    # Store in A
+    ### Store in A
+    ### Seems faster when I place all the stores together at the end???
     if storeA
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
@@ -175,7 +245,7 @@ end
 # K is the amount of preceding columns.
 function A_rdiv_L_kernel_quote(
     R, C, Kmax::Union{Symbol,Integer}, ::Type{T},
-    Astride, Bstride, isU′, invdiagptr,
+    Astride, Bstride, isU′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
     maskload = true, loadB = true, storeA = true
 ) where {T}
@@ -192,8 +262,8 @@ function A_rdiv_L_kernel_quote(
     Riter = R >> Wshift
     Rrem = R & Wm1
     mask = VectorizationBase.mask_from_remainder(T, Rrem)
+    q = quote end
     if loadB
-        q = quote end
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
                 push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (r*W + c*Bstride)) ) ))
@@ -430,6 +500,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     ratios = Vector{Float64}(undef, max_aloads)
     row_counts = Vector{Int}(undef, max_aloads)
     col_counts = Vector{Int}(undef, max_aloads)
+    # is the remainder 0, are we using the alt strat (doing the remainder first then last) instead of remainder first for both divisions
     strategy = Vector{Tuple{Bool,Bool}}(undef, max_aloads)
     if not_max(cols)
         for aloads in 1:max_aloads
@@ -437,6 +508,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
             loads, b1, b2 = div_ul_loads(cols, aloads, ncol)
             strategy[aloads] = (b1,b2)
             ratio = aloads / loads
+            nrow = aloads * W
             if not_max(rows)
                 complete_rows, row_rem = divrem(rows, nrow)
                 if row_rem > 0
@@ -446,7 +518,6 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
                 end
             end
             ratios[aloads] = ratio
-            nrow = aloads * W
             row_counts[aloads] = nrow
             col_counts[aloads] = ncol
             if nrow >= rows
@@ -461,7 +532,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
             row_counts[aloads] = nrow
             col_counts[aloads] = ncol
             loads = aloads + ncol
-            ratios = aloads * ncol / loads
+            ratio = aloads * ncol / loads
             if not_max(rows)
                 complete_rows, row_rem = divrem(rows, nrow)
                 if row_rem > 0
@@ -469,7 +540,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
                     ratio = ( ratio * complete_rows * nrow + row_rem * (rem_aloads * ncol) / (rem_aloads + ncol) ) / rows
                 end
             end
-            ratios[aloads] = ratios
+            ratios[aloads] = ratio
             if nrow >= rows
                 ratios[aloads+1:end] .= 0
                 break
@@ -666,13 +737,13 @@ function A_rdiv_L′_quote(
         end
     end
     push!(q.args, :C)
-    q    
+    q
 end
 @generated function A_rdiv_B!(
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
     Badj::Adjoint{T,<:AbstractLowerTriangularMatrix{N,T,NBL}}
-#) where {M,N,T,CP,AP,NBL}
+# ) where {M,N,T,CP,AP,NBL}
 ) where {M,N,T,NBL,CP,AP}
     A_rdiv_L′_quote(
         M, N, T, CP, AP, NBL
