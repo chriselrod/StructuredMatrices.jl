@@ -180,6 +180,9 @@ function A_rdiv_L_kernel_quote(
     maskload = true, loadB = true, storeA = true
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
+    # if isU′
+    #     throw("Should be false!!!!")
+    # end
     size_T = sizeof(T)
     if isU′
         K = Kmax
@@ -217,13 +220,13 @@ function A_rdiv_L_kernel_quote(
                 if c == 0
                     push!(q.args, Expr(:(=), Symbol(:Loffset_,c), 0  ))
                 else
-                    push!(q.args, Expr(:(=), Symbol(:Loffset_,c), :($Kmax*$(c*size_T) - $(coff*size_T))  ))
+                    # push!(q.args, Expr(:(=), Symbol(:Loffset_,c), :($Kmax*$(c*size_T) - $(coff*size_T))  ))
+                    push!(q.args, Expr(:(=), Symbol(:Loffset_,c), :( ($Kmax*$(c*size_T) +  $((coff-C*c)*size_T)))))
                 end
-                coff += c + 2
             else
-                push!(q.args, Expr(:(=), Symbol(:Loffset_,c), size_T * (Kmax * c - coff)))
-                coff += c + 2
+                push!(q.args, Expr(:(=), Symbol(:Loffset_,c), size_T * ((Kmax-C)*c + coff)))
             end
+            coff += C - c - 2
         end
     end
     # Updating based on all earlier columns
@@ -241,7 +244,7 @@ function A_rdiv_L_kernel_quote(
                 push!(q.args, Expr(:(=), Ltrisym2, :($(CtriL + K*C))))
             end
         else
-            push!(q.args, Expr(:(=), :ptrAloop, :($Asym + C*Astride*size_T)))
+            push!(q.args, Expr(:(=), :ptrAloop, :($Asym + $(C*Astride*size_T))))
             push!(q.args, Expr(:(=), :Ltripointer2, :($Ltrisym2 + $((C-1)*size_T))))
         end
         loopbody = quote end
@@ -265,9 +268,11 @@ function A_rdiv_L_kernel_quote(
         if isU′
             jloopstart = K isa Symbol ? :($K - $C) : K - C
             jloopend = Kmax isa Symbol ? :($Kmax - 1) : Kmax - 1
+            # @show jloopend, isU′
         else
             jloopstart = 0#C-1
-            jloopend = Kmax isa Symbol ? :($Kmax - $(C-1)) : Kmax - C - 1
+            jloopend = Kmax isa Symbol ? :($Kmax - $(C+1)) : Kmax - C - 1
+            # @show jloopend, isU′
         end
         mainloop = quote
             @inbounds for j ∈ $jloopstart:$jloopend
@@ -344,7 +349,7 @@ function div_triangle_loads_crfirst(ncol, aloads, colblock)#, ncolblock = div(nc
         ncolblock, colrem = divrem(ncol, colblock)
 #    end
     ncolblock, colrem = divrem(ncol, colblock)
-    div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+    div_triangle_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
 end
 function div_triangle_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
     necessary_loads = aloads*ncol + binomial2(ncol+1)
@@ -357,19 +362,19 @@ function div_triangle_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
 end
 function div_triangle_loads_crlast(ncol, aloads, colblock)
     ncolblock, colrem = divrem(ncol, colblock)
-    div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
+    div_triangle_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
 end
 
 
 # returns:
 # Number of loads, whether there is a remainder
 function div_ul_loads(ncol, aloads, colblock, ncolblock, colrem)
-    tfirst = div_u_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
+    tfirst = div_triangle_loads_crfirst(ncol, aloads, colblock, ncolblock, colrem)
     twotfirst = tfirst + tfirst
     if colrem == 0
         twotfirst - (aloads * colblock), true, false
     else
-        tlast = div_u_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
+        tlast = div_triangle_loads_crlast(ncol, aloads, colblock, ncolblock, colrem)
         alt_strat = tfirst + tlast - (aloads * colblock)
         primary_strat = twotfirst - (aloads * colrem)
         min(primary_strat, alt_strat), false, alt_strat < primary_strat
@@ -524,7 +529,7 @@ function A_rdiv_U_quote(
     total_row_iterations = n_row_reps + (row_rem > 0)
     n_col_reps, col_rem = divrem(N, Nk)
     total_col_iterations = n_col_reps + (col_rem > 0)
-    Nl = ( N + W - 1 ) & ~W
+    Nl = ( N + W - 1 ) & ~Wm1
     Nl = Nl > NBL ? N : Nl # Don't segfault
     size_T = sizeof(T)
     q = quote
@@ -565,8 +570,8 @@ end
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
     B::AbstractUpperTriangularMatrix{N,T,NBL}
-) where {M,N,T,NBL,CP,AP}
-#) where {M,N,T,CP,AP,NBL}
+#) where {M,N,T,NBL,CP,AP}
+) where {M,N,T,CP,AP,NBL}
     A_rdiv_U_quote(M, N, T, CP, AP, NBL)
 end
 
@@ -624,7 +629,7 @@ function A_rdiv_L′_quote(
     total_row_iterations = n_row_reps + (row_rem > 0)
     n_col_reps, col_rem = divrem(N, Nk)
     total_col_iterations = n_col_reps + (col_rem > 0)
-    Nl = ( N + W - 1 ) & ~W
+    Nl = ( N + W - 1 ) & ~Wm1
     Nl = Nl > NBL ? N : Nl # Don't segfault
     size_T = sizeof(T)
     q = quote
@@ -645,7 +650,7 @@ function A_rdiv_L′_quote(
         row_loops = quote
             for rrep ∈ 1:$n_row_reps
                 ptrUdiag = pointer(invdiag)
-                ptrUtri = pointer(B) + $(size_T * N)
+                ptrUtri = ptrUtribase#pointer(B) + $(size_T * N)
                 $row_iter
                 ptrB += $(size_T*Mk)
                 ptrA += $(size_T*Mk)
@@ -667,8 +672,8 @@ end
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
     Badj::Adjoint{T,<:AbstractLowerTriangularMatrix{N,T,NBL}}
-) where {M,N,T,CP,AP,NBL}
-#) where {M,N,T,NBL,CP,AP}
+#) where {M,N,T,CP,AP,NBL}
+) where {M,N,T,NBL,CP,AP}
     A_rdiv_L′_quote(
         M, N, T, CP, AP, NBL
     )
@@ -683,15 +688,17 @@ function A_div_L_rowiter(
     N = Nk * n_col_reps + col_rem
     size_T = sizeof(T)
     if col_rem > 0
+        
         row_iter = A_rdiv_L_kernel_quote(
             Mk, col_rem, col_rem, T, CP, AP, false, true
         )
         #pushfirst!(row_iter.args, :(ptrUtri = ptrUtribase))
         fullcols = Nk * n_col_reps
         # handle following in A_rdiv_L_quote
-#        pushfirst!(row_iter.args, :(ptrA = pointer(A) + $(CP*fullcols*size_T)))
-#        pushfirst!(row_iter.args, :(ptrB = pointer(B) + $(AP*fullcols*size_T)))
+        # pushfirst!(row_iter.args, :(ptrA -= $(CP*col_rem*size_T)))
+        # pushfirst!(row_iter.args, :(ptrB -= $(AP*col_rem*size_T)))
         push!(row_iter.args, :(ptrLdiag -= $(col_rem*size_T)))
+        push!(row_iter.args, :(ptrLtri -= $((binomial2(Nk) + Nk*col_rem)*size_T)))
         base_K = col_rem
         KmZ = false
     else
@@ -706,13 +713,13 @@ function A_div_L_rowiter(
         row_iter_loop = quote
             K = $col_rem
             for crep ∈ 0:$(n_col_reps-1)
-                ptrA -= $(NK*CP*size_T)
-                ptrB -= $(Nk*AP*size_T)
-                ptrLtri -= $(size_T*(Nk*K + binomial2(Nk)))  # = ptrLtribase + K*$size_T
                 K += $Nk
                 $iterquote
                 ptrLdiag -= $(size_T*Nk)
-                K += $Nk
+                #K += $Nk
+                ptrA -= $(Nk*CP*size_T)
+                ptrB -= $(Nk*AP*size_T)
+                ptrLtri -= $size_T*($Nk*K + $(binomial2(Nk)))  # = ptrLtribase + K*$size_T
             end
         end
         push!(row_iter.args, row_iter_loop)
@@ -736,18 +743,19 @@ function A_rdiv_L_quote(
     total_row_iterations = n_row_reps + (row_rem > 0)
     n_col_reps, col_rem = divrem(N, Nk)
     total_col_iterations = n_col_reps + (col_rem > 0)
-    Nl = ( N + W - 1 ) & ~W
+    Nl = ( N + W - 1 ) & ~Wm1
     Nl = Nl > NBL ? N : Nl # Don't segfault
     size_T = sizeof(T)
+    startoffset = (total_col_iterations-1) * Nk
     q = quote
-        B = Badj.parent
         invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
-        ptrB = pointer(A)
-        ptrA = pointer(C)
-        ptrUtribase = pointer(B) + $(N*size_T)
+        ptrB_base = pointer(A) + $(size_T*AP*startoffset)
+        ptrA_base = pointer(C) + $(size_T*CP*startoffset)
+        ptrLtribase = pointer(B) + $(size_T * (N + binomial2(startoffset) + startoffset * (N - startoffset))) # diag + triangle + subtriangle
+        ptrLdiagbase = pointer(invdiag) + $(size_T * startoffset)
     end
     Mk1 = n_row_reps == 0 ? row_rem : Mk
     row_iter = A_div_L_rowiter(
@@ -756,19 +764,27 @@ function A_rdiv_L_quote(
     if n_row_reps > 1
         row_loops = quote
             for rrep ∈ 1:$n_row_reps
-                ptrUdiag = pointer(invdiag)
-                ptrUtri = pointer(B) + $(size_T * N)
+                ptrLdiag = ptrLdiagbase
+                ptrLtri = ptrLtribase
+                ptrA = ptrA_base
+                ptrB = ptrB_base
                 $row_iter
-                ptrB += $(size_T*Mk)
-                ptrA += $(size_T*Mk)
+                ptrB_base += $(size_T*Mk)
+                ptrA_base += $(size_T*Mk)
             end
         end
         push!(q.args, row_loops)
     else
-        push!(q.args, :(ptrUdiag = pointer(invdiag)))
-        push!(q.args, :(ptrUtri = ptrUtribase))
+        push!(q.args, :(ptrLdiag = ptrLdiagbase))
+        push!(q.args, :(ptrLtri = ptrLtribase))
+        push!(q.args, :(ptrA = ptrA_base))
+        push!(q.args, :(ptrB = ptrB_base))
         push!(q.args, row_iter)
         if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
+            push!(q.args, :(ptrLdiag = ptrLdiagbase))
+            push!(q.args, :(ptrLtri = ptrLtribase))
+            push!(q.args, :(ptrA = ptrA_base + $(size_T*Mk)))
+            push!(q.args, :(ptrB = ptrB_base + $(size_T*Mk)))
             push!(q.args, A_div_L_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
         end
     end
@@ -776,15 +792,25 @@ function A_rdiv_L_quote(
     q    
 end
 
-function A_rdiv_B!(
+@generated function A_rdiv_B!(
+    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    B::AbstractLowerTriangularMatrix{N,T,NBL}
+# ) where {M,N,T,CP,AP,NBL}
+) where {M,N,T,NBL,CP,AP}
+    A_rdiv_L_quote(
+        M, N, T, CP, AP, NBL
+    )
+end
+function A_rdiv_B_expr(
     C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
     A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
     B::AbstractLowerTriangularMatrix{N,T,NBL}
 ) where {M,N,T,CP,AP,NBL}
 #) where {M,N,T,NBL,CP,AP}
-    A_rdiv_L_quote(
+    PaddedMatrices.prettify(A_rdiv_L_quote(
         M, N, T, CP, AP, NBL
-    )
+    ))
 end
 
 
@@ -798,24 +824,20 @@ function A_rdiv_B!(
 end
 
 
-function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    B::AbstractSymmetricMatrixU{N,T}
-) where {M,N,T,CP,AP,NBL}
-#) where {M,N,T,NBL,CP,AP}
-
-end
-
-
-function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    B::AbstractSymmetricMatrixL{N,T}
-) where {M,N,T,CP,AP,NBL}
-#) where {M,N,T,NBL,CP,AP}
-
-end
+# function A_rdiv_B!(
+#     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+#     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+#     B::AbstractSymmetricMatrixU{N,T}
+# ) where {M,N,T,CP,AP,NBL}
+# #) where {M,N,T,NBL,CP,AP}
+# end
+# function A_rdiv_B!(
+#     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+#     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+#     B::AbstractSymmetricMatrixL{N,T}
+# ) where {M,N,T,CP,AP,NBL}
+# #) where {M,N,T,NBL,CP,AP}
+# end
 
 
 
