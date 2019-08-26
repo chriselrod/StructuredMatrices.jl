@@ -247,7 +247,7 @@ function A_rdiv_L_kernel_quote(
     R, C, Kmax::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, isU′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
-    maskload = true, loadB = true, storeA = true
+    maskload = true, loadB = true, storeA = true, calc_product::Int = 0
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     # if isU′
@@ -266,14 +266,16 @@ function A_rdiv_L_kernel_quote(
     if loadB
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
-                push!(q.args, :($(Symbol(:A_,r,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (r*W + c*Bstride)) ) ))
+                set_asym = Symbol(:A_,r,:_,c)
+                push!(q.args, :($set_asym = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $size_T * ($(r*W) + $c*$Bstride)) ) )
             end
             if Rrem > 0
                 # Only need to mask if we're on last column
+                set_asym = Symbol(:A_,Riter,:_,c)
                 if maskload && c == C-1
-                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (Riter*W + c*Bstride)), $mask ) ))
+                    push!(q.args, :($set_asym = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $size_T * ($(Riter*W) + $c*$Bstride), $mask) ))
                 else
-                    push!(q.args, :($(Symbol(:A_,Riter,:_,c)) = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $(size_T * (Riter*W + c*Bstride)) ) ))
+                    push!(q.args, :($set_asym = SIMDPirates.vload(Vec{$W,$T}, $Bsym + $size_T * ($(Riter*W) + $c*$Bstride)) ))
                 end
             end
         end
@@ -314,12 +316,12 @@ function A_rdiv_L_kernel_quote(
                 push!(q.args, Expr(:(=), Ltrisym2, :($(CtriL + K*C))))
             end
         else
-            push!(q.args, Expr(:(=), :ptrAloop, :($Asym + $(C*Astride*size_T))))
+            push!(q.args, Expr(:(=), :ptrAloop, :($Asym + $(C*size_T)*$Astride)))
             push!(q.args, Expr(:(=), :Ltripointer2, :($Ltrisym2 + $((C-1)*size_T))))
         end
         loopbody = quote end
         for r ∈ 0:Riterl
-            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, ptrAloop + j*$(Astride*size_T) + $(r*W*size_T))))
+            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, ptrAloop + j*$Astride*$size_T + $(r*W*size_T))))
         end
         if isU′
             push!(loopbody.args, :($Ltrisym += j))
@@ -390,14 +392,20 @@ function A_rdiv_L_kernel_quote(
         end
     end
     push!(q.args, finish_block)
+    if calc_product > 0 # calculate lower tirangle of A' * B
+        # calc_product is an indicator
+        # 0 indicates don't calc product
+        # otherwise, it indicates number of columns to left of kernel
+
+    end
     # Store in A
     if storeA
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
-                push!(q.args, :( SIMDPirates.vstore!( $Asym + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
+                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(r*W) + $c*Astride), $(Symbol(:A_,r,:_,c)) ) ))
             end
             if Rrem > 0
-                push!(q.args, :( SIMDPirates.vstore!( $Asym + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(Riter*W) + $c*Astride), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
             end
         end
     end
