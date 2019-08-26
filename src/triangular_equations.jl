@@ -162,13 +162,13 @@ function A_rdiv_U_kernel_quote(
             if reduce_sym isa Symbol
                 for r ∈ 0:Riter-1
                     Arj = Symbol(:A_,r,:_0)
-                    reduce_r = Symbol(reduce_sym, :_, r)
-                    push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vmuladd($Arj, $Arj, $reduce_r))))
+                    reduce_r = Symbol(reduce_sym, :_, r ÷ 4)
+                    push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vadd(SIMDPirates.vmul($Arj, $Arj), $reduce_r))))
                 end
                 if Rrem > 0
                     Arj = Symbol(:A_,Riter,:_0)
-                    reduce_r = Symbol(reduce_sym, :_, Riter)
-                    push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vifelse($mask, SIMDPirates.vmuladd($Arj,$Arj,$reduce_r),$reduce_r))))
+                    reduce_r = Symbol(reduce_sym, :_, Riter ÷ 4)
+                    push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vifelse($mask, SIMDPirates.vadd(SIMDPirates.vmul($Arj,$Arj),$reduce_r),$reduce_r))))
                 end
             end
         end
@@ -211,12 +211,12 @@ function A_rdiv_U_kernel_quote(
                 if reduce_sym isa Symbol
                     for r ∈ 0:Riter-1
                         Arj = Symbol(:A_,r,:_,c)
-                        reduce_r = Symbol(reduce_sym, :_, r)
+                        reduce_r = Symbol(reduce_sym, :_, r ÷ 4)
                         push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vmuladd($Arj, $Arj, $reduce_r))))
                     end
                     if Rrem > 0
                         Arj = Symbol(:A_,Riter,:_,c)
-                        reduce_r = Symbol(reduce_sym, :_, Riter)
+                        reduce_r = Symbol(reduce_sym, :_, Riter ÷ 4)
                         push!(q.args, Expr(:(=), reduce_r, :(SIMDPirates.vifelse($mask, SIMDPirates.vmuladd($Arj,$Arj,$reduce_r), $reduce_r))))
                     end
                 end
