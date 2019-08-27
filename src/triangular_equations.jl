@@ -83,13 +83,6 @@ function A_rdiv_U_kernel_quote(
             end
         end
     end
-    if storeA
-        if K isa Symbol
-            push!(q.args, :(AsymK = $Asym + $(size_T*Astride)*$K))
-        else
-            push!(q.args, :(AsymK = $Asym + $(size_T*Astride*K)))
-        end
-    end
     if !isL′
         if Ustride isa Integer
             coff = Ustride
@@ -229,6 +222,13 @@ function A_rdiv_U_kernel_quote(
     ### Store in A
     ### Seems faster when I place all the stores together at the end???
     if storeA
+        if K isa Symbol
+            push!(q.args, :(AsymK = $Asym + $(size_T*Astride)*$K))
+        else
+            push!(q.args, :(AsymK = $Asym + $(size_T*Astride*K)))
+        end
+    # end
+    # if storeA
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
                 push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
@@ -258,7 +258,7 @@ function A_rdiv_L_kernel_quote(
         K = Kmax
     end
     W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
-    Wm1 = W - 1
+    Wm1 = W - 1; V = Vec{W,T}
     Riter = R >> Wshift
     Rrem = R & Wm1
     mask = VectorizationBase.mask_from_remainder(T, Rrem)
@@ -396,18 +396,95 @@ function A_rdiv_L_kernel_quote(
         # calc_product is an indicator
         # 0 indicates don't calc product
         # otherwise, it indicates number of columns to left of kernel
-
+        # outer loop iterates over column of v∂L; we update these columns, iterating over rows of A and B inside to maximize out of order execution
+        for c ∈ 0:C-1
+            b2c = binomial2(c)
+            # We load elements from v∂L of this column
+            # diagonal
+            diagv∂L = Symbol(:v∂L_, c, :_, c)
+            push!(q.args, Expr(:(=), diagv∂L, :(SIMDPirates.vload($V, ptrv∂Ldiag + $(c*size_T*W)))))
+            # now, the off diagonal
+            for cc ∈ c+1:C-1
+                subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
+                push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vload($V, ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc - b2c))))))
+            end
+            # Now, we load vectors from B one at a time, and multiply
+            for r ∈ 0:Riterl
+                # load
+                set_bsym = Symbol(:B_,r,:_,c)
+                if maskload && r == Riterl && Rrem > 0
+                    push!(q.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(Riter*W) + $c*$Bstride), $mask) ))
+                else
+                    push!(q.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(r*W) + $c*$Bstride)) ) )
+                end
+                # multuplication; diag first
+                push!(q.args, Expr(:(=), diagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$diagv∂L))))
+                for cc ∈ c+1:C-1
+                    subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
+                    push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,cc)),$set_bsym,$subdiagv∂L))))
+                end
+            end
+            # Now, store the results
+            push!(q.args, :(SIMDPirates.vstore!(ptrv∂Ldiag + $(c*size_T*W), $diagv∂L)))
+            # now, store the off diagonal
+            for cc ∈ c+1:C-1
+                subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
+                push!(q.args, :(SIMDPirates.vstore!(ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc - b2c)), $subdiagv∂L)))
+            end
+        end
     end
+    # take a break from calc_product while that part of A is still close in memory, in case A === B
     # Store in A
     if storeA
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
-                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(r*W) + $c*Astride), $(Symbol(:A_,r,:_,c)) ) ))
+                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(r*W) + $c*$Astride), $(Symbol(:A_,r,:_,c)) ) ))
             end
             if Rrem > 0
-                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(Riter*W) + $c*Astride), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(Riter*W) + $c*$Astride), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
             end
         end
+    end
+    if calc_product > 0
+        loopbody = quote end
+        # load elements from v∂L
+        for c ∈ 0:C-1
+            subdiagv∂L = Symbol(:v∂L_, c, :_x)
+            push!(loopbody.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vload($V, ptrv∂Ltri + $(W*size_T)*($c - decrement)))))
+        end
+        # Now, we load vectors from B one at a time, and multiply
+        for r ∈ 0:Riterl
+            # load
+            set_bsym = Symbol(:B_,r,:_x)
+            if maskload && r == Riterl && Rrem > 0
+                push!(loopbody.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(Riter*W) - colleft*$Bstride), $mask) ))
+            else
+                push!(loopbody.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(r*W) - colleft*$Bstride)) ) )
+            end
+            for c ∈ 0:C-1
+                subdiagv∂L = Symbol(:v∂L_, c, :_x)
+                push!(loopbody.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$subdiagv∂L))))
+            end
+        end
+        # now, store the sub-diagonal
+        for c ∈ 0:C-1
+            subdiagv∂L = Symbol(:v∂L_, c, :_x)
+            push!(loopbody.args, :(SIMDPirates.vstore!(ptrv∂Ltri + $(W*size_T)*($c - decrement),$subdiagv∂L)))
+        end
+
+        calc_prod_quote = quote
+            decrement = 0
+            numtrianglerows = $Kmax
+            colleft = 0
+            # do one column at a time
+            while numtrianglerows < $calc_product
+                decrement += numtrianglerows
+                numtrianglerows += 1
+                colleft += 1
+                $loopbody
+            end
+        end
+        push!(q.args, calc_prod_quote)
     end
     q
 end
