@@ -398,15 +398,15 @@ function A_rdiv_L_kernel_quote(
         # otherwise, it indicates number of columns to left of kernel
         # outer loop iterates over column of v∂L; we update these columns, iterating over rows of A and B inside to maximize out of order execution
         for c ∈ 0:C-1
-            b2c = binomial2(c)
+            b2c = binomial2(c+1)
             # We load elements from v∂L of this column
             # diagonal
             diagv∂L = Symbol(:v∂L_, c, :_, c)
             push!(q.args, Expr(:(=), diagv∂L, :(SIMDPirates.vload($V, ptrv∂Ldiag + $(c*size_T*W)))))
             # now, the off diagonal
-            for cc ∈ c+1:C-1
-                subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
-                push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vload($V, ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc - b2c))))))
+            for cc ∈ c:C-2
+                subdiagv∂L = Symbol(:v∂L_, cc+1, :_, c)
+                push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vload($V, ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc-c - b2c))))))
             end
             # Now, we load vectors from B one at a time, and multiply
             for r ∈ 0:Riterl
@@ -427,9 +427,9 @@ function A_rdiv_L_kernel_quote(
             # Now, store the results
             push!(q.args, :(SIMDPirates.vstore!(ptrv∂Ldiag + $(c*size_T*W), $diagv∂L)))
             # now, store the off diagonal
-            for cc ∈ c+1:C-1
-                subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
-                push!(q.args, :(SIMDPirates.vstore!(ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc - b2c)), $subdiagv∂L)))
+            for cc ∈ c:C-2
+                subdiagv∂L = Symbol(:v∂L_, cc+1, :_, c)
+                push!(q.args, :(SIMDPirates.vstore!(ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc-c - b2c)), $subdiagv∂L)))
             end
         end
     end
@@ -473,15 +473,15 @@ function A_rdiv_L_kernel_quote(
         end
 
         calc_prod_quote = quote
-            decrement = 0
+            decrement = $Kmax
             numtrianglerows = $Kmax
             colleft = 0
             # do one column at a time
             while numtrianglerows < $calc_product
-                decrement += numtrianglerows
-                numtrianglerows += 1
                 colleft += 1
                 $loopbody
+                decrement += numtrianglerows
+                numtrianglerows += 1
             end
         end
         push!(q.args, calc_prod_quote)
