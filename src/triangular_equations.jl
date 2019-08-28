@@ -136,7 +136,7 @@ function A_rdiv_U_kernel_quote(
         trioff = 0#size_T
         #push!(q.args, :(ptrUtr -= $size_T))
     end
-    for j ∈ 0:C-2
+    for j ∈ 0:max(C-2,0)
         if j == 0
             vUjj = Symbol(:vU_,j,:_,j)
             push!(q.args, Expr(:(=), vUjj, :(SIMDPirates.vbroadcast(Vec{$W,$T}, VectorizationBase.load($Udiagsym + $(size_T*j))))))
@@ -644,7 +644,7 @@ function A_div_U_rowiter(
         row_iter = A_rdiv_U_kernel_quote(
             Mk, col_rem, 0, T, CP, AP, 0, false, true
         )
-        push!(row_iter.args, :(ptrUtri += (binomial2(col_rem)*size_T)))
+        push!(row_iter.args, :(ptrUtri += $(binomial2(col_rem)*size_T)))
         push!(row_iter.args, :(ptrUdiag += $(col_rem*size_T)))
         base_K = col_rem
     else
