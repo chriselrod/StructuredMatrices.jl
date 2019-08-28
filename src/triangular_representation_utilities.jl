@@ -247,6 +247,11 @@ end
 @inline Base.pointer(A::PtrSymmetricMatrixL) = A.ptr
 @inline Base.pointer(A::PtrSymmetricMatrixU) = A.ptr
 
+@inline Base.pointer(A::PtrLowerTriangularMatrix{P,Vec{W,T}}) where {P,W,T} = Base.unsafe_convert(Ptr{T},A.ptr)
+@inline Base.pointer(A::PtrUpperTriangularMatrix{P,Vec{W,T}}) where {P,W,T} = Base.unsafe_convert(Ptr{T},A.ptr)
+@inline Base.pointer(A::PtrSymmetricMatrixL{P,Vec{W,T}}) where {P,W,T} = Base.unsafe_convert(Ptr{T},A.ptr)
+@inline Base.pointer(A::PtrSymmetricMatrixU{P,Vec{W,T}}) where {P,W,T} = Base.unsafe_convert(Ptr{T},A.ptr)
+
 @inline function Base.getindex(A::AbstractMutableDiagMatrix{P,T,L}, i::Integer) where {P,T,L}
     @boundscheck i > L && ThrowBoundsError("i = $i > L = $L")
     VectorizationBase.load(pointer(A) + sizeof(T) * (i-1))
