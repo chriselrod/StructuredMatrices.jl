@@ -1309,43 +1309,72 @@ end
 end
 
 
-function unrolled_update(P, W, Wshift, T; xsym = :ptrx, xusym = :ptrx, Lsym = :ptrLdiag, Lusym = :ptrLdiag, Ltrisym = :ptrLtri, Lutrisym = :ptrLtri, rem_loop = true)
+function unrolled_update(
+    P::Int, W::Int, Wshift::Int, T::DataType;
+    xsym::Symbol = :ptrx, xusym::Symbol = :ptrx, Lsym::Symbol = :ptrLdiag, Lusym::Symbol = :ptrLdiag, Ltrisym::Symbol = :ptrLtri, Lutrisym::Symbol = :ptrLtri,
+    rem_loop::Bool = true#, xscalar::Bool = false, track_L::Bool = false, track_x::Bool = false
+)
     size_T = sizeof(T)
     V = Vec{W,T}
     q = quote end
-    for d ∈ (W-P):W-1
-        p = W - d
-        r_p = Symbol(:r_,p)
-        x_p = Symbol(:x_,p)
-        c_p = Symbol(:c_,p)
-        s_p = Symbol(:s_,p)
-        l_p_p = Symbol(:L_,p,:_,p)
-        push!(q.args, Expr(:(=), x_p, :(VectorizationBase.load($xsym + $d*$size_T))))
-        push!(q.args, Expr(:(=), l_p_p, :(VectorizationBase.load($Lsym + $d*$size_T))))
-        push!(q.args, Expr(:(=), r_p, macroexpand(Base, :(@fastmath sqrt($l_p_p*$l_p_p + $x_p*$x_p)))))
-        push!(q.args, Expr(:(=), c_p, :(SIMDPirates.vbroadcast($V,Base.FastMath.div_fast($r_p, $l_p_p)))))
-        push!(q.args, Expr(:(=), s_p, :(SIMDPirates.vbroadcast($V,Base.FastMath.div_fast($x_p, $l_p_p)))))
-        push!(q.args, Expr(:call, :(VectorizationBase.store!), :($Lusym + $d*$size_T), r_p))
+    for c ∈ (W-P):W-1
+        p = W - c
+        d_c = Symbol(:d_,c)
+        x_c = Symbol(:x_,c)
+        c_c = Symbol(:c_,c)
+        s_c = Symbol(:s_,c)
+        l_c_c = Symbol(:L_,c,:_,c)
+        invl_c_c = Symbol(:invL_,c,:_,c)
+        push!(q.args, Expr(:(=), x_c, :(VectorizationBase.load($xsym + $c*$size_T))))
+        push!(q.args, Expr(:(=), l_c_c, :(VectorizationBase.load($Lsym + $c*$size_T))))
+        push!(q.args, Expr(:(=), invl_c_c, :(Base.FastMath.div_fast(one($T), $l_c_c))))
+        push!(q.args, Expr(:(=), d_c, macroexpand(Base, :(@fastmath sqrt($l_c_c*$l_c_c + $x_c*$x_c)))))
+        push!(q.args, Expr(:(=), c_c, :(SIMDPirates.vbroadcast($V,Base.FastMath.mul_fast($d_c, $invl_c_c)))))
+        push!(q.args, Expr(:(=), s_c, :(SIMDPirates.vbroadcast($V,Base.FastMath.mul_fast($x_c, $invl_c_c)))))
+        push!(q.args, Expr(:call, :(VectorizationBase.store!), :($Lusym + $c*$size_T), d_c))
+        # if track_x
+        #     if xscalar
+        #         ∂d∂x = Symbol(:∂d_,c,:∂x)
+        #         push!(q.args, Expr(:(=), ∂d∂x, :(Base.FastMath.div_fast($x_c, $d_c))))
+        #         ∂s∂x = Symbol(:∂s_,c,:∂x)
+        #         ∂c∂x = Symbol(:∂c_,c,:∂x)
+        #         push!(q.args, Expr(:(=), ∂c∂x, :(Base.FastMath.mul_fast($∂d∂x, $invl_c_c))))
+        #         push!(q.args, Expr(:(=), ∂s∂x, invl_c_c))
+        #         push!(q.args, :(VectorizationBase.store!($(Symbol(:∂,xsym)) + $c*$size_T), VectorizationBase.load($(Symbol(:∂,xsym,:∂a)) + $c*$size_T) * ∂d∂x))
+        #     else
+        #         throw("xscalar == $xscalar while track_x == $track_x is not yet supported.")
+        #     end
+        # end
+        # if track_L
+        #     ∂d∂Lcc = Symbol(:∂d∂L_,p,:_,p)
+        #     push!(q.args, Expr(:(=), ∂d∂Lcc, :(Base.FastMath.div_fast($l_c_c, $d_c))))
+        #     ∂invL∂L = Symbol(:∂invL_,p,:_,p,:∂L_,p,:_,p)
+        #     push!(q.args, Expr(:(=), ∂invL∂L, :(Base.FastMath.mul_fast(-one($T), $invl_c_c, $invl_c_c))))
+        #     ∂s∂Lcc = Symbol(:∂s_,c,:∂L_,c,:_,c)
+        #     ∂c∂Lcc = Symbol(:∂c_,c,:∂L_,c,:_,c)
+        #     push!(q.args, Expr(:(=), ∂s∂Lcc, :(Base.FastMath.mul_fast($x_c, $∂invL∂L))))
+        #     push!(q.args, Expr(:(=), ∂c∂Lcc, :(Base.FastMath.add_fast(Base.FastMath.mul_fast($d_c, $∂invL∂L), Base.FastMath.mul_fast($∂d∂Lcc,$invl_c_c)))))
+        # end
         if p > 1
             rem = p - 1
-            mask = ~ VectorizationBase.mask(T, d+1)
-            vL = Symbol(:vL_,p+1,:_,p)
-            vLu = Symbol(:vLu_,p+1,:_,p)
-            vx = Symbol(:vL_,p+1)
+            mask = ~ VectorizationBase.mask(T, c+1)
+            vL = Symbol(:vL_,c+1,:_,c)
+            vLu = Symbol(:vLu_,c+1,:_,c)
+            vx = Symbol(:vL_,c+1)
             push!(q.args, Expr(:(=), vL, :(SIMDPirates.vload($V,$Ltrisym + trioffset*$size_T, $mask))))
             push!(q.args, Expr(:(=), vx, :(SIMDPirates.vload($V,$xsym, $mask))))
-            push!(q.args, Expr(:(=), vLu, :(SIMDPirates.vfdiv(SIMDPirates.vadd($vL, SIMDPirates.vmul($s_p, $vx)), $c_p))))
+            push!(q.args, Expr(:(=), vLu, :(SIMDPirates.vfdiv(SIMDPirates.vadd($vL, SIMDPirates.vmul($s_c, $vx)), $c_c))))
             push!(q.args, :(SIMDPirates.vstore!($Lutrisym + trioffset*$size_T, $vLu,$mask)))
-            push!(q.args, :(SIMDPirates.vstore!($xusym, SIMDPirates.vsub(SIMDPirates.vmul($c_p,$vx), SIMDPirates.vmul($s_p, $vLu)), $mask)))
+            push!(q.args, :(SIMDPirates.vstore!($xusym, SIMDPirates.vsub(SIMDPirates.vmul($c_c,$vx), SIMDPirates.vmul($s_c, $vLu)), $mask)))
         end
         if rem_loop
             rem_quote = quote
                 for rep ∈ 1:repetitions
                     vL_j_p = SIMDPirates.vload($V, $Ltrisym + $size_T*trioffset + $size_T*$W*rep)
                     vx_j = SIMDPirates.vload($V, $xsym + $size_T*$W*rep)
-                    vLu_j_p = SIMDPirates.vfdiv(SIMDPirates.vadd(vL_j_p, SIMDPirates.vmul($s_p,vx_j)), $c_p)
+                    vLu_j_p = SIMDPirates.vfdiv(SIMDPirates.vadd(vL_j_p, SIMDPirates.vmul($s_c,vx_j)), $c_c)
                     SIMDPirates.vstore!($Lutrisym + $size_T*trioffset + $size_T*$W*rep, vLu_j_p)
-                    SIMDPirates.vstore!($xsym + $size_T*$W*rep, SIMDPirates.vsub(SIMDPirates.vmul($c_p,vx_j), SIMDPirates.vmul($s_p,vLu_j_p)))
+                    SIMDPirates.vstore!($xsym + $size_T*$W*rep, SIMDPirates.vsub(SIMDPirates.vmul($c_c,vx_j), SIMDPirates.vmul($s_c,vLu_j_p)))
                 end
             end
             push!(q.args, rem_quote)
@@ -1409,16 +1438,191 @@ function rank_one_updated_lower_triangle_quote(P, T; xsym = :x, xusym = :x, Lsym
     q
 end
 
-@generated function rank_update(L::AbstractMutableLowerTriangularMatrix{P,T}, y::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T}) where {T,P}
+@generated function rank_update!(
+    Lu::AbstractMutableLowerTriangularMatrix{P,T},
+    L::AbstractMutableLowerTriangularMatrix{P,T},
+    a::Union{<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T},T}
+) where {T,P}
     quote
-        Lu = MutableLowerTriangularMatrix{$P,$T}(undef)
         x = MutableFixedSizePaddedVector{$P,$T}(undef)
-        x .= y
+        x .= a
         $(rank_one_updated_lower_triangle_quote(P,T,Lsym = :L, Lusym = :Lu))
         Lu
     end
 end
+function rank_update(L::AbstractLowerTriangularMatrix{P,T}, a) where {P,T}
+    Lu = MutableLowerTriangularMatrix{P,T}(undef)
+    rank_update!(Lu, L, a)
+end
 
+
+function phi_at_b_quote(P, T, load_A = true, store_C = true, halve_diagonal = true)
+    W = VectorizationBase.pick_vector_width(P,T)
+    if P > 4W && store_C && load_A
+        return quote
+            increment = $P
+            @inbounds @fastmath for c in 1:$P
+                for r in 1:c-1
+                    C[r,c] = zero($T)
+                end
+                C_c_c = A[c] * B[c]
+                for d in 1:$P-c
+                    C_c_c += A[increment + d] * B[increment + d]
+                end
+                C[c,c] = $(halve_diagonal ? :($(T(0.5))*C_c_c) : :C_c_c)
+                incr_r = increment + $P - c
+                for r in 1+c:$P
+                    C_r_c = A[r] * B[increment+r-c]
+                    # @show C_r_c
+                    incr_r -= r
+                    for i in r+1:$P
+                        # @show r,c, (incr_r+i), (increment+i-c)
+                        C_r_c += A[incr_r + i] * B[increment+i-c]
+                    end
+                    incr_r += $P
+                    C[r,c] = C_r_c
+                end
+                increment += $P - c
+            end
+            C
+        end
+    end
+    q = quote end
+    increment = P
+    for c in 1:P
+        if store_C
+            for r in 1:c-1
+                push!(q.args, :($(Symbol(:C_,r,:_,c)) = zero($T)))
+            end
+        end
+        C_c_c = Symbol(:C_,c,:_,c)
+        load_A ? push!(q.args, :($C_c_c = A[$c] * B[$c])) : push!(q.args, :($C_c_c = $(Symbol(:A_,c,:_,c)) * B[$c]))
+        if load_A
+            for d in 1:P-c
+                push!(q.args, :($C_c_c += A[$(increment + d)] * B[$(increment + d)]))
+            end
+        else
+            for d in 1:P-c
+                push!(q.args, :($C_c_c += $(Symbol(:A_,c+d,:_,c)) * B[$(increment + d)]))
+            end
+        end
+        halve_diagonal && push!(q.args, :($C_c_c *= $(T(0.5))))
+        incr_r = increment + P - c
+        for r in 1+c:P
+            if load_A
+                push!(q.args, :($(Symbol(:C_,r,:_,c)) = A[$r] * B[$(increment+r-c)]))
+                incr_r -= r
+                for i in r+1:P
+                    push!(q.args, :($(Symbol(:C_,r,:_,c)) += A[$(incr_r + i)] * B[$(increment+i-c)]))
+                end
+                incr_r += P
+            else
+                push!(q.args, :($(Symbol(:C_,r,:_,c)) = $(Symbol(:A_,r,:_,r)) * B[$(increment+r-c)]))
+                for i in r+1:P
+                    push!(q.args, :($(Symbol(:C_,r,:_,c)) += $(Symbol(:A_,i,:_,r)) * B[$(increment+i-c)]))
+                end
+            end
+        end
+        increment += P - c
+        if store_C
+            for r in 1:P
+                push!(q.args, :(C[$r,$c] = $(Symbol(:C_,r,:_,c))))
+            end
+        end
+    end
+    q
+end
+
+@generated function PhiAtB!(
+    C::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{P,P,T},
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original chol
+    B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
+) where {P,T}
+    q = phi_at_b_quote(P, T)
+    quote
+        @fastmath @inbounds begin
+            $q
+        end
+        C
+    end
+end
+
+function reverse_chol_grad_expr(P, T)
+    q = quote end
+    inc = P
+    for c in 1:P
+        push!(q.args, Expr(:(=), Symbol(:A_,c,:_,c), :(A[$c])))
+        push!(q.args, Expr(:(=), Symbol(:invA_,c,:_,c), :(Base.FastMath.div_fast(one($T),$(Symbol(:A_,c,:_,c))))))
+        for r in c+1:P
+            inc += 1
+            push!(q.args, Expr(:(=), Symbol(:A_,r,:_,c), :(A[$inc])))
+        end
+    end
+    push!(q.args, phi_at_b_quote(P, T, false, false, false)) # We treat as a reflected Symmetric matrix.
+    # Now, we must calc A' \ C / A = (C / A)' / A
+    for _c_ in 0:P-1
+        c = P - _c_
+        for r in 1:P
+            X_r_c = Symbol(:X_,c,:_,r) # we transpose X; hence Symbol(:X_,c,:_,r) instead of _r_c
+            clt, rlt = minmax(r, c)
+            C_r_c = Symbol(:C_,rlt,:_,clt)
+            push!(q.args, :($X_r_c = $C_r_c))
+            for j in c+1:P
+                clt, rlt = minmax(r, j)
+                X_r_j = Symbol(:X_,j,:_,r)
+                A_j_c = Symbol(:A_,j,:_,c)
+                push!(q.args, :($X_r_c -= $X_r_j * $A_j_c ))
+            end
+            push!(q.args, :($X_r_c *= $(Symbol(:invA_,c,:_,c))))
+        end
+    end
+    # Second division.
+    for _c_ in 0:P-1
+        c = P - _c_
+        for r in 1:c
+            X_r_c = Symbol(:X_,r,:_,c)
+            S_r_c = Symbol(:S_,r,:_,c)
+            push!(q.args, :($S_r_c = $X_r_c))
+            for j in c+1:P
+                S_r_j = Symbol(:S_,r,:_,j)
+                A_j_c = Symbol(:A_,j,:_,c)
+                push!(q.args, :($S_r_c -= $S_r_j * $A_j_c ))
+            end
+            push!(q.args, :($S_r_c *= $(Symbol(:invA_,c,:_,c))))
+        end
+    end
+    inc = P
+    for c in 1:P
+        push!(q.args, Expr(:(=), :(S[$c]), Expr(:call, :(*), T(0.5), Symbol(:S_,c,:_,c))))
+        for r in c+1:P
+            inc += 1
+            push!(q.args, Expr(:(=), :(S[$inc]), Symbol(:S_,c,:_,r)))
+        end
+    end
+    q
+end
+
+@generated function reverse_cholesky_grad!(
+    S::AbstractMutableLowerTriangularMatrix{P,T},
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original chol
+    B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
+) where {P,T}
+# ) where {T,P}
+    q = reverse_chol_grad_expr(P, T)
+    quote
+        @fastmath @inbounds begin
+            $q
+        end
+        S
+    end
+end
+function reverse_cholesky_grad(
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original chol
+    B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
+) where {P,T}
+    S = MutableLowerTriangularMatrix{P,T}(undef)
+    reverse_cholesky_grad!(S, A, B)
+end
 #@generated function rank_update()
 #
 #end

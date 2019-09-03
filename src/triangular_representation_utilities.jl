@@ -50,6 +50,8 @@ end
 end
 
 
+@inline lt_sub2ind_fast(P, i, j) = i == j ? i : j * P - binomial2(j) + i - j
+@inline ut_sub2ind_fast(P, i, j) = i == j ? i : 1 + P + binomial2(j) + i - j
 function lt_sub2ind(P, i, j)
     i == j && return i
     j, i = minmax(i, j)
@@ -282,26 +284,26 @@ end
 end
 
 @inline function Base.setindex!(A::AbstractMutableLowerTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
-    ind = lt_sub2ind(P, i, j)
-    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    ind = lt_sub2ind_fast(P, i, j)
+    @boundscheck ind > L && ThrowBoundsError("i > $L.")
     VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
     v
 end
 @inline function Base.setindex!(A::AbstractMutableLowerTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
-    ind = lt_sub2ind(P, i, j)
-    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    ind = lt_sub2ind_fast(P, i, j)
+    @boundscheck ind > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
     v
 end
 @inline function Base.setindex!(A::AbstractMutableUpperTriangularMatrix{P,T,L}, v, i::Integer, j::Integer) where {P,T,L}
-    ind = ut_sub2ind(P, i, j)
-    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    ind = ut_sub2ind_fast(P, i, j)
+    @boundscheck ind > L && ThrowBoundsError("i > $L.")
     VectorizationBase.store!(pointer(A) + (ind-1) * sizeof(T), convert(T,v))
     v
 end
 @inline function Base.setindex!(A::AbstractMutableUpperTriangularMatrix{P,NTuple{W,Core.VecElement{T}},L}, v::NTuple{W,Core.VecElement{T}}, i::Integer, j::Integer) where {P,T,L,W}
-    ind = ut_sub2ind(P, i, j)
-    @boundscheck i > L && ThrowBoundsError("i > $L.")
+    ind = ut_sub2ind_fast(P, i, j)
+    @boundscheck ind > L && ThrowBoundsError("i > $L.")
     SIMDPirates.vstore!(pointer(A) + (ind-1) * sizeof(NTuple{W,Core.VecElement{T}}), v)
     v
 end
