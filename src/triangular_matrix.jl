@@ -1307,3 +1307,118 @@ end
         sp,out
     end
 end
+
+
+function unrolled_update(P, W, Wshift, T; xsym = :ptrx, xusym = :ptrx, Lsym = :ptrLdiag, Lusym = :ptrLdiag, Ltrisym = :ptrLtri, Lutrisym = :ptrLtri, rem_loop = true)
+    size_T = sizeof(T)
+    V = Vec{W,T}
+    q = quote end
+    for d ∈ (W-P):W-1
+        p = W - d
+        r_p = Symbol(:r_,p)
+        x_p = Symbol(:x_,p)
+        c_p = Symbol(:c_,p)
+        s_p = Symbol(:s_,p)
+        l_p_p = Symbol(:L_,p,:_,p)
+        push!(q.args, Expr(:(=), x_p, :(VectorizationBase.load($xsym + $d*$size_T))))
+        push!(q.args, Expr(:(=), l_p_p, :(VectorizationBase.load($Lsym + $d*$size_T))))
+        push!(q.args, Expr(:(=), r_p, macroexpand(Base, :(@fastmath sqrt($l_p_p*$l_p_p + $x_p*$x_p)))))
+        push!(q.args, Expr(:(=), c_p, :(SIMDPirates.vbroadcast($V,Base.FastMath.div_fast($r_p, $l_p_p)))))
+        push!(q.args, Expr(:(=), s_p, :(SIMDPirates.vbroadcast($V,Base.FastMath.div_fast($x_p, $l_p_p)))))
+        push!(q.args, Expr(:call, :(VectorizationBase.store!), :($Lusym + $d*$size_T), r_p))
+        if p > 1
+            rem = p - 1
+            mask = ~ VectorizationBase.mask(T, d+1)
+            vL = Symbol(:vL_,p+1,:_,p)
+            vLu = Symbol(:vLu_,p+1,:_,p)
+            vx = Symbol(:vL_,p+1)
+            push!(q.args, Expr(:(=), vL, :(SIMDPirates.vload($V,$Ltrisym + trioffset*$size_T, $mask))))
+            push!(q.args, Expr(:(=), vx, :(SIMDPirates.vload($V,$xsym, $mask))))
+            push!(q.args, Expr(:(=), vLu, :(SIMDPirates.vfdiv(SIMDPirates.vadd($vL, SIMDPirates.vmul($s_p, $vx)), $c_p))))
+            push!(q.args, :(SIMDPirates.vstore!($Lutrisym + trioffset*$size_T, $vLu,$mask)))
+            push!(q.args, :(SIMDPirates.vstore!($xusym, SIMDPirates.vsub(SIMDPirates.vmul($c_p,$vx), SIMDPirates.vmul($s_p, $vLu)), $mask)))
+        end
+        if rem_loop
+            rem_quote = quote
+                for rep ∈ 1:repetitions
+                    vL_j_p = SIMDPirates.vload($V, $Ltrisym + $size_T*trioffset + $size_T*$W*rep)
+                    vx_j = SIMDPirates.vload($V, $xsym + $size_T*$W*rep)
+                    vLu_j_p = SIMDPirates.vfdiv(SIMDPirates.vadd(vL_j_p, SIMDPirates.vmul($s_p,vx_j)), $c_p)
+                    SIMDPirates.vstore!($Lutrisym + $size_T*trioffset + $size_T*$W*rep, vLu_j_p)
+                    SIMDPirates.vstore!($xsym + $size_T*$W*rep, SIMDPirates.vsub(SIMDPirates.vmul($c_p,vx_j), SIMDPirates.vmul($s_p,vLu_j_p)))
+                end
+            end
+            push!(q.args, rem_quote)
+        end
+        if p > 1
+            push!(q.args, :(trioffset += triincrement))
+        else
+            push!(q.args, :(trioffset += triincrement+$W))
+        end
+        push!(q.args, :(triincrement -= 1))
+    end
+    push!(q.args, :(repetitions -= 1; $xsym += $W * $size_T; $Lsym += $W*$size_T;))
+    Lusym == Lsym || push!(q.args, :($Lusym += $W*$size_T))
+    xusym == xsym || push!(q.args, :($xusym += $W*$size_T))
+    q
+end
+
+function rank_one_updated_lower_triangle_quote(P, T; xsym = :x, xusym = :x, Lsym = :L, Lusym = :L)
+    W, Wshift = VectorizationBase.pick_vector_width_shift(P-1,T) # Even with avx512, we'd want W=4 for P=5, or W=2 for P=3,etc.
+    Wm1 = W - 1
+    V = Vec{W,T}
+    reps = P >> Wshift
+    rem = P & Wm1
+    size_T = sizeof(T)
+    xsymp = Symbol(:ptr, xsym)
+    xusymp = Symbol(:ptr, xusym)
+    Lsymp = Symbol(:ptr, Lsym,:diag)
+    Lusymp = Symbol(:ptr, Lusym,:diag)
+    Ltrisymp = Symbol(:ptr, Lsym,:tri)
+    Lutrisymp = Symbol(:ptr, Lusym,:tri)
+    # We loop over batches of 8
+    initial_offset = rem == 0 ? 0 : W - rem
+    q = quote
+        triincrement = $(P - 2)
+        trioffset = 0
+        repetitions = $reps
+        $xsymp = pointer($xsym) - $size_T * $initial_offset
+        $Lsymp = pointer($Lsym) - $size_T * $initial_offset
+        $Ltrisymp = $Lsymp + $size_T * $(P-1)
+    end
+    if xsym != xusym
+        push!(q.args, :($xusymp = pointer($xusym) - $size_T * $initial_offset))
+    end
+    if Lsym != Lusym
+        push!(q.args, :($Lusymp = pointer($Lusym) - $size_T * $initial_offset; $Lutrisymp = $Lusymp + $size_T * $(P-1)))
+    end
+    if rem > 0
+        push!(q.args, unrolled_update(rem, W, Wshift, T, xsym = xsymp, xusym = xusymp, Lsym = Lsymp, Lusym = Lusymp, Ltrisym = Ltrisymp, Lutrisym = Lutrisymp, rem_loop = reps > 0))
+    end
+    if reps == 1
+        push!(q.args, unrolled_update(W, W, Wshift, T, xsym = xsymp, xusym = xusymp, Lsym = Lsymp, Lusym = Lusymp, Ltrisym = Ltrisymp, Lutrisym = Lutrisymp, rem_loop = false))
+    elseif reps > 1
+        loop_quote = quote
+            for _ ∈ 1:$reps
+                $(unrolled_update(W, W, Wshift, T, xsym = xsymp, xusym = xusymp, Lsym = Lsymp, Lusym = Lusymp, Ltrisym = Ltrisymp, Lutrisym = Lutrisymp, rem_loop = true))
+            end
+        end
+        push!(q.args, loop_quote)
+    end
+    push!(q.args, nothing)
+    q
+end
+
+@generated function rank_update(L::AbstractMutableLowerTriangularMatrix{P,T}, y::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T}) where {T,P}
+    quote
+        Lu = MutableLowerTriangularMatrix{$P,$T}(undef)
+        x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        x .= y
+        $(rank_one_updated_lower_triangle_quote(P,T,Lsym = :L, Lusym = :Lu))
+        Lu
+    end
+end
+
+#@generated function rank_update()
+#
+#end
