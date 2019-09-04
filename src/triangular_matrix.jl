@@ -1410,7 +1410,7 @@ function rank_one_updated_lower_triangle_quote(P, T; xsym = :x, xusym = :x, Lsym
     q = quote
         triincrement = $(P - 2)
         trioffset = 0
-        repetitions = $reps
+        repetitions = $(reps + (rem > 0) - 1)
         $xsymp = pointer($xsym) - $size_T * $initial_offset
         $Lsymp = pointer($Lsym) - $size_T * $initial_offset
         $Ltrisymp = $Lsymp + $size_T * $(P-1)
@@ -1467,11 +1467,13 @@ function rank_update(L::AbstractLowerTriangularMatrix{P,T}, a) where {P,T}
     Lu = MutableLowerTriangularMatrix{P,T}(undef)
     rank_update!(Lu, L, a)
 end
-@generated function rank_update(sptr::StackPointer, L::AbstractLowerTriangularMatrix{P,T,L}, a) where {P,T,L}
+@generated function rank_update(sptr::StackPointer, L::AbstractLowerTriangularMatrix{P,T,N}, a) where {P,T,N}
+    ptr_offset = VectorizationBase.align(N*sizeof(T))
+    N2 = ptr_offset ÷ sizeof(T)
     quote
-        Lu = PtrLowerTriangularMatrix{P,T}(pointer(sptr,$T))
-#        rank_update!(sptr + $(VectorizationBase.align(L*size_T)), Lu, L, a)
-        sptr + $(VectorizationBase.align(L*size_T)), rank_update!(Lu, L, a)
+        Lu = PtrLowerTriangularMatrix{$P,$T,$N2}(pointer(sptr,$T))
+#        rank_update!(sptr + $(VectorizationBase.align(N*sizeof(T))), Lu, L, a)
+        sptr + $ptr_offset, rank_update!(Lu, L, a)
     end
 end
 PaddedMatrices.@support_stack_pointer rank_update
@@ -1568,7 +1570,7 @@ end
     end
 end
 
-function reverse_chol_grad_expr(P, T, store_S::Bool = true)
+function reverse_chol_grad_expr(P, T; store_S::Bool = true, halve_diagonal = true)
     q = quote end
     inc = P
     for c in 1:P
@@ -1615,7 +1617,11 @@ function reverse_chol_grad_expr(P, T, store_S::Bool = true)
     if store_S
         inc = P
         for c in 1:P
-            push!(q.args, Expr(:(=), :(S[$c]), Expr(:call, :(*), T(0.5), Symbol(:S_,c,:_,c))))
+            if halve_diagonal
+                push!(q.args, Expr(:(=), :(S[$c]), Expr(:call, :(*), T(0.5), Symbol(:S_,c,:_,c))))
+            else
+                push!(q.args, Expr(:(=), :(S[$c]), Symbol(:S_,c,:_,c)))
+            end
             for r in c+1:P
                 inc += 1
                 push!(q.args, Expr(:(=), :(S[$inc]), Symbol(:S_,r,:_,c)))
@@ -1631,7 +1637,7 @@ end
     B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
 ) where {P,T}
 # ) where {T,P}
-    q = reverse_chol_grad_expr(P, T)
+    q = reverse_chol_grad_expr(P, T, halve_diagonal = false)
     quote
         @fastmath @inbounds begin
             $q
@@ -1646,15 +1652,300 @@ function reverse_cholesky_grad(
     S = MutableLowerTriangularMatrix{P,T}(undef)
     reverse_cholesky_grad!(S, A, B)
 end
+@generated function reverse_cholesky_grad(
+    sptr::StackPointer,
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original chol
+    B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
+) where {P,T}
+    Wm1 = VectorizationBase.pick_vector_width(T) - 1
+    N = (binomial2(P+1) + Wm1) & ~Wm1
+    quote
+        S = PtrLowerTriangularMatrix{$P,$T,$N}(pointer(sptr,$T))
+        sptr + $(sizeof(T)) * $N, spreverse_cholesky_grad!(S, A, B)
+    end
+end
+
 
 struct RankUpdateAdjoint{P,T,L,A<:AbstractMutableLowerTriangularMatrix{P,T,L}}
     data::A
 end
 
+function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool = false, store_S::Bool = false)
+    (track_L || track_x) || return quote end
+    q = reverse_chol_grad_expr(P, T, store_S = store_S)
+    if track_L
+        ### for L
+        # if s isa Number
+        #     sv = fill!(MutableFixedSizePaddedVector{8,Float64}(undef), s);
+        # else
+        #     sv = s
+        # end
+        # Lu = StructuredMatrices.rank_update(L1, sv)
+        # StructuredMatrices.reverse_cholesky_grad!(S, Lu, Ladjoint)
+        # LowerTriangular(Symmetric(Array(S),:L)*L1)
+        for k ∈ 1:P
+            for c ∈ 1:k
+                assignment = k == c ? :(=) : :(+=)
+                L_k_c = Symbol(:L_,k,:_,c)
+                if k == c
+                    push!(q.args, Expr(:(=), L_k_c, :(Linput[$k])))
+                else
+                    push!(q.args, Expr(:(=), L_k_c, :(Linput[$(lt_sub2ind_fast(P,k,c))])))
+                end
+                for r ∈ c:P
+                    pL_r_c = Symbol(:∂L_,r,:_,c)
+                    cs, rs = minmax(r, k)
+                    S_r_k = Symbol(:S_,rs,:_,cs)
+                    push!(q.args, Expr(assignment, pL_r_c, :($S_r_k * $L_k_c)))
+                end
+            end
+        end
+        inc = P
+        for c ∈ 1:P
+            push!(q.args, :(∂L[$c] = $(Symbol(:∂L_,c,:_,c))))
+            for r ∈ c+1:P
+                pL_r_c = Symbol(:∂L_,r,:_,c)
+                inc += 1
+                push!(q.args, :(∂L[$inc] = $pL_r_c))
+            end
+        end
+    end
+    if track_x
+        ### for xscalar
+        # x2p3 = fill!(MutableFixedSizePaddedVector{8,Float64}(undef), s);
+        # Lu = StructuredMatrices.rank_update(L1, x2p3)
+        # StructuredMatrices.reverse_cholesky_grad!(S, Lu, Ladjoint)
+        # sumSsub = zero(eltype(S))
+        # sumSdiag = zero(eltype(S))
+        # N = size(S,2)
+        # for n ∈ 1:N
+        #     sumSdiag += S[n,n]
+        # end
+        # for c ∈ 1:N
+        #     for r ∈ c+1:N
+        #         sumSsub += S[r,c]
+        #     end
+        # end
+        # s*(sumSdiag + 2sumSsub)
+        W, Wshift = VectorizationBase.pick_vector_width_shift(P,T)
+        Wm1 = W - 1
+        if xscalar
+            for c ∈ 1:P
+                sumSdiag = Symbol(:sumdiag_, (c-1) & Wm1)
+                assigment = ( ( (c-1) >> Wshift ) == 0 ) ? :(=) : :(+=)
+                push!(q.args, Expr(assigment, sumSdiag, Symbol(:S_,c,:_,c)))
+                for r ∈ c+1:P
+                    sumSsub = Symbol(:sumsub_, (r-2) & Wm1)
+                    assigment = ( ( (r-2) >> Wshift ) == 0 ) ? :(=) : :(+=)
+                    push!(q.args, Expr(assigment, sumSsub, Symbol(:S_,r,:_,c)))
+                end
+            end
+            WLd = min(Wm1, P-1)
+            WLs = min(Wm1, P-2)
+            push!(q.args, Expr(:(=), :sumSdiag, Expr(:call, :(+), [Symbol(:sumdiag_,i) for i ∈ 0:WLd]...)))
+            push!(q.args, Expr(:(=), :sumSsub, Expr(:call, :(+), [Symbol(:sumsub_,i) for i ∈ 0:WLs]...)))
+            push!(q.args, Expr(:(=), :∂x, :(xinput * (sumSdiag + $(T(2))*sumSsub))))
+        ### for xvector
+        # Lu = StructuredMatrices.rank_update(L1, s)
+        # StructuredMatrices.reverse_cholesky_grad!(S, Lu, Ladjoint)
+        # grad = similar(s)
+        # for i ∈ eachindex(grad)
+        #     g = zero(eltype(grad))
+        #     for j ∈ 1:i-1
+        #         g += S[i,j] * s[j]
+        #     end
+        #     g += S[i,i] * s[i]
+        #     for j ∈ i+1:length(grad)
+        #         g += S[j,i] * s[j]
+        #     end
+        #     grad[i] = g
+        # end
+        # grad
+        else
+            for k in 1:P
+                assignment = k == 1 ? :(=) : :(+=)
+                push!(q.args, :(x_k = xinput[$k]))
+                for i in 1:P
+                    cs, rs = minmax(i,k)
+                    S_i_k = Symbol(:S_,rs,:_,cs)
+                    push!(q.args, Expr(assignment, Symbol(:x_,i), :($S_i_k * x_k)))
+                end
+            end
+            for i in 1:P
+                push!(q.args, :(∂x[$i] = $(Symbol(:x_,i))))
+            end
+        end
+    end
+    q
+end
+
+@generated function ∂rank_update(
+    sptr::StackPointer,
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
+    xinput::T # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
+    sptroffset = VectorizationBase.align(binomial2(P+1)*sizeof(T))
+    quote
+        ∂L = PtrLowerTriangularMatrix{$P,$T}(sptr)
+        #∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        @inbounds @fastmath begin
+            $q
+        end
+        sptr + $sptroffset, (∂L, ∂x)
+    end
+end
+@generated function ∂rank_update(
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
+    xinput::T # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
+    quote
+        ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
+        #∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        @inbounds @fastmath begin
+            $q
+        end
+        ∂L, ∂x
+    end
+end
+
+@generated function ∂rank_update(
+    sptr::StackPointer,
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
+    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = false)
+    sptroffset1 = VectorizationBase.align(binomial2(P+1)*sizeof(T))
+    sptroffset2 = sptroffset1 + VectorizationBase.align(P*sizeof(T))
+    quote
+        ∂L = PtrLowerTriangularMatrix{$P,$T}(sptr)
+        ∂x = PtrVector{$P,$T}(sptr + $sptroffset1)
+        @inbounds @fastmath begin
+            $q
+        end
+        sptr + $sptroffset2, (∂L, ∂x)
+    end
+end
+@generated function ∂rank_update(
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
+    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+) where {P,T}
+# ) where {T,P}
+    q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = false)#, store_S = true)
+    quote
+        ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
+        ∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        # S = MutableLowerTriangularMatrix{$P,$T}(undef)
+        @inbounds @fastmath begin
+            $q
+        end
+        # S, ∂L, ∂x
+        ∂L, ∂x
+    end
+end
+
+@generated function ∂rank_update(
+    sptr::StackPointer,
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    xinput::T  # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = true)
+    quote
+        @inbounds @fastmath begin
+            $q
+        end
+        sptr, ∂x
+    end
+end
+@generated function ∂rank_update(
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    xinput::T # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = true)
+    quote
+        @inbounds @fastmath begin
+            $q
+        end
+        ∂x
+    end
+end
+
+@generated function ∂rank_update(
+    sptr::StackPointer,
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = false)
+    sptroffset1 = VectorizationBase.align(P*sizeof(T))
+    quote
+        ∂x = PtrVector{$P,$T}(sptr)
+        @inbounds @fastmath begin
+            $q
+        end
+        sptr + $sptroffset1, ∂x
+    end
+end
+@generated function ∂rank_update(
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = false)
+    quote
+        ∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        @inbounds @fastmath begin
+            $q
+        end
+        ∂x
+    end
+end
+@generated function ∂rank_update(
+    sptr::StackPointer,
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    Linput::AbstractMutableLowerTriangularMatrix{P,T} # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = true, track_x = false)
+    sptroffset1 = VectorizationBase.align(binomial2(P+1)*sizeof(T))
+    quote
+        ∂L = PtrLowerTriangularMatrix{$P,$T}(sptr)
+        @inbounds @fastmath begin
+            $q
+        end
+        sptr + $sptroffset1, ∂L
+    end
+end
+@generated function ∂rank_update(
+    A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
+    B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
+    Linput::AbstractMutableLowerTriangularMatrix{P,T} # original input argument
+) where {P,T}
+    q = ∂rank_update_quote(P, T, track_L = true, track_x = false)
+    quote
+        ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
+        @inbounds @fastmath begin
+            $q
+        end
+        ∂L
+    end
+end
 
 
+PaddedMatrices.@support_stack_pointer reverse_cholesky_grad
 PaddedMatrices.@support_stack_pointer ∂rank_update
-PaddedMatrices.@support_stack_pointer ∂rank_update!
+# PaddedMatrices.@support_stack_pointer ∂rank_update!
 
 
 #@generated function rank_update()
