@@ -1450,11 +1450,32 @@ end
         Lu
     end
 end
+@generated function rank_update!(
+    sptr::StackPointer,
+    Lu::AbstractMutableLowerTriangularMatrix{P,T},
+    L::AbstractMutableLowerTriangularMatrix{P,T},
+    a::Union{<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T},T}
+) where {T,P}
+    quote
+        x = PtrVector{$P,$T}(pointer(sptr,$T))
+        x .= a
+        $(rank_one_updated_lower_triangle_quote(P,T,Lsym = :L, Lusym = :Lu))
+        Lu
+    end
+end
 function rank_update(L::AbstractLowerTriangularMatrix{P,T}, a) where {P,T}
     Lu = MutableLowerTriangularMatrix{P,T}(undef)
     rank_update!(Lu, L, a)
 end
-
+@generated function rank_update(sptr::StackPointer, L::AbstractLowerTriangularMatrix{P,T,L}, a) where {P,T,L}
+    quote
+        Lu = PtrLowerTriangularMatrix{P,T}(pointer(sptr,$T))
+#        rank_update!(sptr + $(VectorizationBase.align(L*size_T)), Lu, L, a)
+        sptr + $(VectorizationBase.align(L*size_T)), rank_update!(Lu, L, a)
+    end
+end
+PaddedMatrices.@support_stack_pointer rank_update
+PaddedMatrices.@support_stack_pointer rank_update!
 
 function phi_at_b_quote(P, T, load_A = true, store_C = true, halve_diagonal = true)
     W = VectorizationBase.pick_vector_width(P,T)
@@ -1547,7 +1568,7 @@ end
     end
 end
 
-function reverse_chol_grad_expr(P, T)
+function reverse_chol_grad_expr(P, T, store_S::Bool = true)
     q = quote end
     inc = P
     for c in 1:P
@@ -1581,22 +1602,24 @@ function reverse_chol_grad_expr(P, T)
         c = P - _c_
         for r in 1:c
             X_r_c = Symbol(:X_,r,:_,c)
-            S_r_c = Symbol(:S_,r,:_,c)
+            S_r_c = Symbol(:S_,c,:_,r)
             push!(q.args, :($S_r_c = $X_r_c))
             for j in c+1:P
-                S_r_j = Symbol(:S_,r,:_,j)
+                S_r_j = Symbol(:S_,j,:_,r)
                 A_j_c = Symbol(:A_,j,:_,c)
                 push!(q.args, :($S_r_c -= $S_r_j * $A_j_c ))
             end
             push!(q.args, :($S_r_c *= $(Symbol(:invA_,c,:_,c))))
         end
     end
-    inc = P
-    for c in 1:P
-        push!(q.args, Expr(:(=), :(S[$c]), Expr(:call, :(*), T(0.5), Symbol(:S_,c,:_,c))))
-        for r in c+1:P
-            inc += 1
-            push!(q.args, Expr(:(=), :(S[$inc]), Symbol(:S_,c,:_,r)))
+    if store_S
+        inc = P
+        for c in 1:P
+            push!(q.args, Expr(:(=), :(S[$c]), Expr(:call, :(*), T(0.5), Symbol(:S_,c,:_,c))))
+            for r in c+1:P
+                inc += 1
+                push!(q.args, Expr(:(=), :(S[$inc]), Symbol(:S_,r,:_,c)))
+            end
         end
     end
     q
@@ -1623,6 +1646,17 @@ function reverse_cholesky_grad(
     S = MutableLowerTriangularMatrix{P,T}(undef)
     reverse_cholesky_grad!(S, A, B)
 end
+
+struct RankUpdateAdjoint{P,T,L,A<:AbstractMutableLowerTriangularMatrix{P,T,L}}
+    data::A
+end
+
+
+
+PaddedMatrices.@support_stack_pointer ∂rank_update
+PaddedMatrices.@support_stack_pointer ∂rank_update!
+
+
 #@generated function rank_update()
 #
 #end

@@ -244,17 +244,17 @@ function cholesky_∂det_quote(
     q   
 end
 
-@generated function choltest!(
-    Lm::AbstractMutableLowerTriangularMatrix{M,T},
-    Sm::AbstractSymmetricMatrixL{M,T}
+#@generated function choltest!(
+#    Lm::AbstractMutableLowerTriangularMatrix{M,T},
+#    Sm::AbstractSymmetricMatrixL{M,T}
 #) where {T,M}
-) where {M,T}
-    chol_quote = cholesky_quote(M, T)
-    quote
-        L = VectorizationBase.vectorizable(Lm)
-        S = VectorizationBase.vectorizable(Sm)
-        $chol_quote
-        Lm
-    end
-end
+##) where {M,T}
+#    chol_quote = cholesky_quote(M, T)
+#    quote
+#        L = VectorizationBase.vectorizable(Lm)
+#        S = VectorizationBase.vectorizable(Sm)
+#        $chol_quote
+#        Lm
+#    end
+#end
 
