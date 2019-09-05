@@ -553,6 +553,7 @@ function div_triangle_blocking_structure(rows = typemax(UInt), cols = typemax(UI
     col_counts = Vector{Int}(undef, max_aloads)
     for aloads in 1:max_aloads
         ncol = div(reg_count - aloads - 1, aloads)
+        ncol = min(cols, ncol)
         loads = div_triangle_loads_crfirst(cols, aloads, ncol)
         nrow = aloads * W
         ratio = aloads / loads
@@ -590,6 +591,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     if not_max(cols)
         for aloads in 1:max_aloads
             ncol = div(reg_count - aloads - 1, aloads)
+            ncol = min(cols, ncol)
             loads, b1, b2 = div_ul_loads(cols, aloads, ncol)
             strategy[aloads] = (b1,b2)
             ratio = aloads / loads
@@ -602,6 +604,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
                     ratio = ( ratio * complete_rows * nrow + row_rem * rem_aloads / rem_loads ) / rows
                 end
             end
+#            @show aloads, ncol, ratio
             ratios[aloads] = ratio
             row_counts[aloads] = nrow
             col_counts[aloads] = ncol
@@ -613,6 +616,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     else
         for aloads in 1:max_aloads
             ncol = div(reg_count - aloads - 1, aloads)
+            ncol = min(cols, ncol)
             nrow = aloads * W
             row_counts[aloads] = nrow
             col_counts[aloads] = ncol

@@ -1729,21 +1729,25 @@ function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool 
         # s*(sumSdiag + 2sumSsub)
         W, Wshift = VectorizationBase.pick_vector_width_shift(P,T)
         Wm1 = W - 1
+        indsumsub = 0
         if xscalar
             for c ∈ 1:P
                 sumSdiag = Symbol(:sumdiag_, (c-1) & Wm1)
                 assigment = ( ( (c-1) >> Wshift ) == 0 ) ? :(=) : :(+=)
                 push!(q.args, Expr(assigment, sumSdiag, Symbol(:S_,c,:_,c)))
                 for r ∈ c+1:P
-                    sumSsub = Symbol(:sumsub_, (r-2) & Wm1)
-                    assigment = ( ( (r-2) >> Wshift ) == 0 ) ? :(=) : :(+=)
+                    sumSsub = Symbol(:sumsub_, indsumsub & Wm1)
+                    assigment = ( ( indsumsub >> Wshift ) == 0 ) ? :(=) : :(+=)
                     push!(q.args, Expr(assigment, sumSsub, Symbol(:S_,r,:_,c)))
+#                    push!(q.args, :(@show $(string(assigment)), $sumSsub, $(Symbol(:S_,r,:_,c))))
+                    indsumsub += 1
                 end
             end
             WLd = min(Wm1, P-1)
-            WLs = min(Wm1, P-2)
+            WLs = min(Wm1, indsumsub-1)
             push!(q.args, Expr(:(=), :sumSdiag, Expr(:call, :(+), [Symbol(:sumdiag_,i) for i ∈ 0:WLd]...)))
             push!(q.args, Expr(:(=), :sumSsub, Expr(:call, :(+), [Symbol(:sumsub_,i) for i ∈ 0:WLs]...)))
+#            push!(q.args, :(@show sumSdiag, sumSsub))
             push!(q.args, Expr(:(=), :∂x, :(xinput * (sumSdiag + $(T(2))*sumSsub))))
         ### for xvector
         # Lu = StructuredMatrices.rank_update(L1, s)
@@ -1785,7 +1789,8 @@ end
     B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
     Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
     xinput::T # original input argument
-) where {P,T}
+#) where {P,T}
+) where {T,P}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
     sptroffset = VectorizationBase.align(binomial2(P+1)*sizeof(T))
     quote
@@ -1802,7 +1807,8 @@ end
     B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
     Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
     xinput::T # original input argument
-) where {P,T}
+#) where {P,T}
+) where {T,P}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
     quote
         ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
