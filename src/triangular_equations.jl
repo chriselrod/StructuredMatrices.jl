@@ -27,7 +27,8 @@ function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Ustride, isL′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Utrisym = :ptrUtri, Udiagsym = :ptrUdiag,
-    maskload = true, loadB = true, storeA = true, reduce_sym::Union{Symbol,Nothing} = nothing
+    maskload = true, loadB = true, storeA = true, reduce_sym::Union{Symbol,Nothing} = nothing,
+    maskexpr = :__mask__
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
@@ -42,7 +43,7 @@ function A_rdiv_U_kernel_quote(
         Wm1 = W - 1
         Riter = 0
         Rrem = 1
-        mask = :(VectorizationBase.mask_from_remainder($T, $R & $Wm1))
+        mask = maskexpr# :(VectorizationBase.mask_from_remainder($T, $R & $Wm1))
     end
     q = quote end
     if loadB
@@ -247,7 +248,8 @@ function A_rdiv_L_kernel_quote(
     R, C, Kmax::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, isU′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
-    maskload = true, loadB = true, storeA = true, calc_product::Int = 0
+    maskload = true, loadB = true, storeA = true, calc_product::Int = 0,
+    maskexpr = :__mask__
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     # if isU′
@@ -257,11 +259,20 @@ function A_rdiv_L_kernel_quote(
     if isU′
         K = Kmax
     end
-    W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
-    Wm1 = W - 1; V = Vec{W,T}
-    Riter = R >> Wshift
-    Rrem = R & Wm1
-    mask = VectorizationBase.mask_from_remainder(T, Rrem)
+    if R isa Integer
+        W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
+        Wm1 = W - 1
+        Riter = R >> Wshift
+        Rrem = R & Wm1
+        mask = VectorizationBase.mask_from_remainder(T, Rrem)
+    else # We assume this is meant to handle a single vector remainder
+        W, Wshift = VectorizationBase.pick_vector_width_shift(T)
+        Wm1 = W - 1
+        Riter = 0
+        Rrem = 1
+        mask = maskexpr #:(VectorizationBase.mask_from_remainder($T, $R & $Wm1))
+    end
+    V = Vec{W,T}
     q = quote end
     if loadB
         for c ∈ 0:C-1
@@ -410,18 +421,27 @@ function A_rdiv_L_kernel_quote(
             end
             # Now, we load vectors from B one at a time, and multiply
             for r ∈ 0:Riterl
+                mask_this_iter = maskload && r == Riterl && Rrem > 0
                 # load
                 set_bsym = Symbol(:B_,r,:_,c)
-                if maskload && r == Riterl && Rrem > 0
-                    push!(q.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(Riter*W) + $c*$Bstride), $mask) ))
-                else
+                # if mask_this_iter
+                #     push!(q.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(Riterl*W) + $c*$Bstride), $mask) ))
+                # else
                     push!(q.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(r*W) + $c*$Bstride)) ) )
-                end
+                # end
                 # multuplication; diag first
-                push!(q.args, Expr(:(=), diagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$diagv∂L))))
-                for cc ∈ c+1:C-1
-                    subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
-                    push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,cc)),$set_bsym,$subdiagv∂L))))
+                if mask_this_iter
+                    push!(q.args, Expr(:(=), diagv∂L, :(SIMDPirates.vifelse($mask,SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$diagv∂L),$diagv∂L))))
+                    for cc ∈ c+1:C-1
+                        subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
+                        push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vifelse($mask,SIMDPirates.vmuladd($(Symbol(:A_,r,:_,cc)),$set_bsym,$subdiagv∂L),$subdiagv∂L))))
+                    end
+                else
+                    push!(q.args, Expr(:(=), diagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$diagv∂L))))
+                    for cc ∈ c+1:C-1
+                        subdiagv∂L = Symbol(:v∂L_, cc, :_, c)
+                        push!(q.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,cc)),$set_bsym,$subdiagv∂L))))
+                    end
                 end
             end
             # Now, store the results
@@ -445,7 +465,7 @@ function A_rdiv_L_kernel_quote(
             end
         end
     end
-    if calc_product > 0
+    if calc_product > 0 && (Kmax isa Symbol || (Kmax < calc_product))
         loopbody = quote end
         # load elements from v∂L
         for c ∈ 0:C-1
@@ -456,14 +476,19 @@ function A_rdiv_L_kernel_quote(
         for r ∈ 0:Riterl
             # load
             set_bsym = Symbol(:B_,r,:_x)
-            if maskload && r == Riterl && Rrem > 0
+            mask_this_iter = maskload && r == Riterl && Rrem > 0
+            if mask_this_iter
                 push!(loopbody.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(Riter*W) - colleft*$Bstride), $mask) ))
             else
                 push!(loopbody.args, :($set_bsym = SIMDPirates.vload($V, $Bsym + $size_T * ($(r*W) - colleft*$Bstride)) ) )
             end
             for c ∈ 0:C-1
                 subdiagv∂L = Symbol(:v∂L_, c, :_x)
-                push!(loopbody.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$subdiagv∂L))))
+                if mask_this_iter
+                    push!(loopbody.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vifelse($mask,SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$subdiagv∂L),$subdiagv∂L) )))
+                else
+                    push!(loopbody.args, Expr(:(=), subdiagv∂L, :(SIMDPirates.vmuladd($(Symbol(:A_,r,:_,c)),$set_bsym,$subdiagv∂L))))
+                end
             end
         end
         # now, store the sub-diagonal
