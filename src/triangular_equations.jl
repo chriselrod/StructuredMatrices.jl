@@ -689,7 +689,7 @@ function A_rdiv_U_quote(
     total_row_iterations = n_row_reps + (row_rem > 0)
     n_col_reps, col_rem = divrem(N, Nk)
     total_col_iterations = n_col_reps + (col_rem > 0)
-    Nl = ( N + W - 1 ) & ~Wm1
+    Nl = ( N + Wm1 ) & ~Wm1
     Nl = Nl > NBL ? N : Nl # Don't segfault
     size_T = sizeof(T)
     q = quote
@@ -719,9 +719,12 @@ function A_rdiv_U_quote(
         push!(q.args, :(ptrUdiag = pointer(invdiag)))
         push!(q.args, :(ptrUtri = pointer(B) + $(size_T * N)))
         push!(q.args, row_iter)
-        if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
-            push!(q.args, A_div_U_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
-        end
+        row_rem > 0 && push!(q.args, :(ptrB += $(size_T*Mk); ptrA += $(Size_T*Mk)))
+    end
+    if row_rem > 0 && n_row_reps > 0
+        push!(q.args, :(ptrUdiag = pointer(invdiag)))
+        push!(q.args, :(ptrUtri = pointer(B) + $(size_T * N)))
+        push!(q.args, A_div_U_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
     end
     push!(q.args, :C)
     q    
@@ -821,9 +824,12 @@ function A_rdiv_L′_quote(
         push!(q.args, :(ptrUdiag = pointer(invdiag)))
         push!(q.args, :(ptrUtri = ptrUtribase))
         push!(q.args, row_iter)
-        if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
-            push!(q.args, A_div_L′_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
-        end
+        push!(q.args, :(ptrB += $(size_T*Mk); ptrA += $(size_T*Mk) ))
+    end
+    if row_rem > 0 && n_row_reps > 0 # then n_row_reps == 1 and row_rem > 0
+        push!(q.args, :(ptrUdiag = pointer(invdiag)))
+        push!(q.args, :(ptrUtri = ptrUtribase))
+        push!(q.args, A_div_L′_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
     end
     push!(q.args, :C)
     q
@@ -940,13 +946,13 @@ function A_rdiv_L_quote(
         push!(q.args, :(ptrA = ptrA_base))
         push!(q.args, :(ptrB = ptrB_base))
         push!(q.args, row_iter)
-        if total_row_iterations == 2 # then n_row_reps == 1 and row_rem > 0
-            push!(q.args, :(ptrLdiag = ptrLdiagbase))
-            push!(q.args, :(ptrLtri = ptrLtribase))
-            push!(q.args, :(ptrA = ptrA_base + $(size_T*Mk)))
-            push!(q.args, :(ptrB = ptrB_base + $(size_T*Mk)))
-            push!(q.args, A_div_L_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
-        end
+    end
+    if row_rem > 0 && n_row_reps > 0
+        push!(q.args, :(ptrLdiag = ptrLdiagbase))
+        push!(q.args, :(ptrLtri = ptrLtribase))
+        push!(q.args, :(ptrA = ptrA_base + $(size_T*Mk)))
+        push!(q.args, :(ptrB = ptrB_base + $(size_T*Mk)))
+        push!(q.args, A_div_L_rowiter( row_rem, Nk, col_rem, T, CP, AP, n_col_reps ))
     end
     push!(q.args, :C)
     q    

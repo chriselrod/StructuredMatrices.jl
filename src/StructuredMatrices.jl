@@ -25,4 +25,15 @@ include("adjoint.jl")
 include("decompositions.jl")
 include("triangular_equations.jl")
 
+
+PaddedMatrices.@support_stack_pointer rank_update
+PaddedMatrices.@support_stack_pointer rank_update!
+PaddedMatrices.@support_stack_pointer reverse_cholesky_grad
+PaddedMatrices.@support_stack_pointer ∂rank_update
+function __init__()
+    for m ∈ (:rank_update, :rank_update!, :reverse_cholesky_grad, :∂rank_update)
+        push!(PaddedMatrices.STACK_POINTER_SUPPORTED_METHODS, m)
+    end
+end
+
 end # module
