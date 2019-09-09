@@ -104,7 +104,7 @@ function A_rdiv_U_kernel_quote(
     if K isa Symbol || K > 0
         loopbody = quote end
         for r ∈ 0:Riterl
-            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + j*$(Astride*size_T) + $(r*W*size_T))))
+            push!(loopbody.args, :($(Symbol(:A_,r,:_j)) = SIMDPirates.vload(Vec{$W,$T}, $Asym + (j*$Astride + $(r*W))*$size_T)))
         end
         for c ∈ 0:C-1
             if isL′ # U is actually a transposed lower triangular matrix
@@ -223,19 +223,19 @@ function A_rdiv_U_kernel_quote(
     ### Store in A
     ### Seems faster when I place all the stores together at the end???
     if storeA
-        if K isa Symbol
-            push!(q.args, :(AsymK = $Asym + $(size_T*Astride)*$K))
-        else
-            push!(q.args, :(AsymK = $Asym + $(size_T*Astride*K)))
-        end
+        # if K isa Symbol
+        push!(q.args, :(AsymK = $Asym + $size_T*$Astride*$K))
+        # else
+            # push!(q.args, :(AsymK = $Asym + $(size_T*Astride*K)))
+        # end
     # end
     # if storeA
         for c ∈ 0:C-1
             for r ∈ 0:Riter-1
-                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (r*W + c*Astride)), $(Symbol(:A_,r,:_,c)) ) ))
+                push!(q.args, :( SIMDPirates.vstore!( AsymK + $size_T * ($(r*W) + $c*$Astride), $(Symbol(:A_,r,:_,c)) ) ))
             end
             if Rrem > 0
-                push!(q.args, :( SIMDPirates.vstore!( AsymK + $(size_T * (Riter*W + c*Astride)), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+                push!(q.args, :( SIMDPirates.vstore!( AsymK + $size_T * ($(Riter*W) + $c*$Astride), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
             end
         end
     end
@@ -569,16 +569,17 @@ not_max(x::T) where {T} = x != typemax(T)
 function div_triangle_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE, verbose = false) where {T}
     cols == typemax(typeof(cols)) && return PaddedMatrices.pick_kernel_size(T, rows, cols,  W = reg_size ÷ sizeof(T), NREG = reg_count)
     W = div(reg_size, sizeof(T))
-    while 2rows < W
-        W >>>= 1
+    if not_max(rows)
+        while 2rows < W
+            W >>>= 1
+        end
     end
     max_aloads = (reg_count >>> 1) - 1
     ratios = Vector{Float64}(undef, max_aloads)
     row_counts = Vector{Int}(undef, max_aloads)
     col_counts = Vector{Int}(undef, max_aloads)
     for aloads in 1:max_aloads
-        ncol = div(reg_count - aloads - 1, aloads)
-        ncol = min(cols, ncol)
+        ncol = min(div(reg_count - aloads - 1, aloads), cols)
         loads = div_triangle_loads_crfirst(cols, aloads, ncol)
         nrow = aloads * W
         ratio = aloads / loads
@@ -604,8 +605,10 @@ end
 
 function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE) where {T}
     W = div(reg_size, sizeof(T))
-    while 2rows < W
-        W >>>= 1
+    if not_max(rows)
+        while 2rows < W
+            W >>>= 1
+        end
     end
     max_aloads = (reg_count >>> 1) - 1
     ratios = Vector{Float64}(undef, max_aloads)
@@ -615,8 +618,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     strategy = Vector{Tuple{Bool,Bool}}(undef, max_aloads)
     if not_max(cols)
         for aloads in 1:max_aloads
-            ncol = div(reg_count - aloads - 1, aloads)
-            ncol = min(cols, ncol)
+            ncol = min(div(reg_count - aloads - 1, aloads), cols)
             loads, b1, b2 = div_ul_loads(cols, aloads, ncol)
             strategy[aloads] = (b1,b2)
             ratio = aloads / loads
