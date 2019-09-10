@@ -29,7 +29,7 @@ end
 @inline function RESERVED_INCREMENT_SEED_RESERVED(
         seedin::AbstractLowerTriangularMatrix,
         jac::∂DiagLowerTri∂LowerTri,
-        seedout::AbstractFixedSizePaddedVector
+        seedout::Union{<:AbstractFixedSizePaddedVector,<:AbstractLowerTriangularMatrix}
     )
     muladd(jac.data, seedin, seedout)
 end
@@ -83,7 +83,7 @@ end
     sp::StackPointer,
     seedin::AbstractLowerTriangularMatrix,
     jac::∂DiagLowerTri∂LowerTri,
-    seedout::AbstractFixedSizePaddedVector
+    seedout::Union{<:AbstractFixedSizePaddedVector,<:AbstractLowerTriangularMatrix}
 )
 #    @show seedin
 #    @show jac.data

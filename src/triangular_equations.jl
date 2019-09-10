@@ -23,6 +23,7 @@ using PaddedMatrices: AbstractMutableFixedSizePaddedMatrix
 # if ilL′
 
 # K is number of earlier iterations
+# divides B by U, stores in A
 function A_rdiv_U_kernel_quote(
     R, C, K::Union{Symbol,Integer}, ::Type{T},
     Astride, Bstride, Ustride, isL′, invdiagptr;
