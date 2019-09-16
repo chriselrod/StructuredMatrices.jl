@@ -24,7 +24,7 @@ include("block_diagonal.jl")
 include("adjoint.jl")
 include("decompositions.jl")
 include("triangular_equations.jl")
-
+include("ragged_matrix.jl")
 
 @def_stackpointer_fallback rank_update rank_update! reverse_cholesky_grad ∂rank_update
 function __init__()

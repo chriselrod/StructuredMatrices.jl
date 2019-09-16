@@ -7,6 +7,8 @@ abstract type AbstractRaggedMatrix{T,I} <: AbstractMatrix{T} end
 #     column_lengths::Vector{I} # length(column_lengths) == size(A,2)
 #     nrow::Int
 # end
+
+# Column offsets go from 0 (col 1 offset), col 2 offset,...,2nd last col offset
 struct RaggedMatrix{T,I,VI<:AbstractVector{I},VT<:AbstractVector{T}} <: AbstractRaggedMatrix{T,I}
     data::VT # length(data) == sum(column_lengths) == column_offsets[end]
     column_offsets::VI # length(column_offsets) == size(A,2)
@@ -22,16 +24,28 @@ Base.size(A::AbstractRaggedMatrix) = (nrow(A),ncol(A))
 number_not_structurally_zero(A::AbstractRaggedMatrix) = length(A.data)
 
 
-Base.getindex(A::AbstractRaggedMatrix, i::Integer) = A.data[i]
+@inline Base.getindex(A::AbstractRaggedMatrix, i::Integer) = A.data[i]
 function Base.getindex(A::AbstractRaggedMatrix{T,I}, i::Integer, j::Integer) where {T,I}
     @boundscheck begin
         ( (i > ncol(A)) || ( (j > nrow(A)) || (min(i,j) < 1) ) && PadddedMatrices.ThrowBoundsError("Tried to index array of size $(size(A)) with index ($i,$j).")
     end
-    col_j_offset = j == one(j) ? zero(I) : A.column_offsets[j-1]#; col_j_length = A.column_descriptions[j,2]
+    col_j_offset = A.column_offsets[j] #j == one(j) ? zero(I) : A.column_offsets[j-1]#; col_j_length = A.column_descriptions[j,2]
+    col_j_nextoffset = j == length(A.column_offsets) ? length(A.data) : A.column_offsets[j+1]
     ind = col_j_offset + Base.unsafe_trunc(I, i)
-    A.column_offsets[j] > ind ? zero(T) : A.data[ind]
+    col_j_nextoffset > ind ? zero(T) : A.data[ind]
 end
 
+### Iteration returns (row, column, value)
+@inline function Base.iterate(A::AbstractRaggedMatrix)
+    (1, 1, 1), (2, 2, 1)
+end
+@inline function Base.iterate(A::AbstractRaggedMatrix, (k,i,j)::NTuple{3,Int})
+    if i > A.column_lengths[j]
+        j == ncol(A) && return nothing
+        i, j = 1, j+1
+    end
+    (k, i, j), (k+1, i+1, j)
+end
 
 function expand_by_x_quote!(q, N, ncol, nrl, T, sp::Bool)
     push!(q.args, ind = 1)
