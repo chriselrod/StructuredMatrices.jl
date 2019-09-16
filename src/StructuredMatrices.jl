@@ -1,7 +1,7 @@
 module StructuredMatrices
 
-using SIMDPirates, SLEEFPirates, VectorizationBase, LinearAlgebra, PaddedMatrices, LoopVectorization
-using PaddedMatrices: AbstractFixedSizePaddedVector, AbstractFixedSizePaddedMatrix, StackPointer
+using SIMDPirates, SLEEFPirates, VectorizationBase, LinearAlgebra, PaddedMatrices, LoopVectorization, StackPointers
+using PaddedMatrices: AbstractFixedSizePaddedVector, AbstractFixedSizePaddedMatrix
 using VectorizationBase: REGISTER_SIZE, REGISTER_COUNT
 
 export addmul!, submul!, inv′, ∂inv′,
@@ -26,14 +26,9 @@ include("decompositions.jl")
 include("triangular_equations.jl")
 
 
-PaddedMatrices.@support_stack_pointer rank_update
-PaddedMatrices.@support_stack_pointer rank_update!
-PaddedMatrices.@support_stack_pointer reverse_cholesky_grad
-PaddedMatrices.@support_stack_pointer ∂rank_update
+@def_stackpointer_fallback rank_update rank_update! reverse_cholesky_grad ∂rank_update
 function __init__()
-    for m ∈ (:rank_update, :rank_update!, :reverse_cholesky_grad, :∂rank_update)
-        push!(PaddedMatrices.STACK_POINTER_SUPPORTED_METHODS, m)
-    end
+    @add_stackpointer_method rank_update rank_update! reverse_cholesky_grad ∂rank_update
 end
 
 end # module
