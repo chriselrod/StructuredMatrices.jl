@@ -27,7 +27,7 @@ number_not_structurally_zero(A::AbstractRaggedMatrix) = length(A.data)
 @inline Base.getindex(A::AbstractRaggedMatrix, i::Integer) = A.data[i]
 function Base.getindex(A::AbstractRaggedMatrix{T,I}, i::Integer, j::Integer) where {T,I}
     @boundscheck begin
-        ( (i > ncol(A)) || ( (j > nrow(A)) || (min(i,j) < 1) ) && PadddedMatrices.ThrowBoundsError("Tried to index array of size $(size(A)) with index ($i,$j).")
+        ( (i > ncol(A)) || ( (j > nrow(A)) || (min(i,j) < 1) ) ) && PadddedMatrices.ThrowBoundsError("Tried to index array of size $(size(A)) with index ($i,$j).")
     end
     col_j_offset = A.column_offsets[j] #j == one(j) ? zero(I) : A.column_offsets[j-1]#; col_j_length = A.column_descriptions[j,2]
     col_j_nextoffset = j == length(A.column_offsets) ? length(A.data) : A.column_offsets[j+1]
