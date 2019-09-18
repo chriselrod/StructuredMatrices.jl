@@ -49,16 +49,21 @@ end
     (k, i, j), (k+1, i+1, j)
 end
 
-function expand_by_x_quote!(q, N, ncol, nrl, T, sp::Bool)
+function expand_by_x_quote!(q, N, ncol, nrl, T, sp::Bool, def::Bool=true)
     push!(q.args, ind = 1)
     loop_body = quote end
     a_getindex = quote end
     return_expression = Expr(:tuple)
     for n in 1:N
-        asym = Symbol(:a_,n)
+        if N > 1
+            asym = Symbol(:a_,n)
+            push!(q.args, :($asym = @inbounds a[$n]))
+        else
+            asym = :a
+        end
         asymi = Symbol(:a_i_,n)
         bsym = Symbol(:b_,n)
-        push!(q.args, pointer_vector_expr( bsym, nrl, T, sp, :sptr) )
+        def && push!(q.args, pointer_vector_expr( bsym, nrl, T, sp, :sptr) )
         push!(a_getindex.args, :($asymi = $asym[i]))
         push!(loop_body.args, :($bsym[ind] = $asymi))
         push!(return_expression.args, bsym)
@@ -86,7 +91,7 @@ function contract_by_x_quote!(q, N, ncol, nrl, T, sp::Bool)
     return_expression = Expr(:tuple)
     for n in 1:N
         asym = Symbol(:a_,n)
-        asymi = Symbol(:a_i_,n)
+        # asymi = Symbol(:a_i_,n)
         bsym = Symbol(:b_,n)
         bsymi = Symbol(:b_i_,n)
         push!(q.args, pointer_vector_expr( bsym, ncol, T, sp, :sptr) )
@@ -117,30 +122,34 @@ function expand_contract_prequote(VI, VT)
         ncol = full_length(VI)
     else
         ncol = :ncol
-        push!(q.args, :($ncol = :(ncol(a))))
+        push!(q.args, :($ncol = :(ncol(x))))
     end
     if VT <: AbstractFixedSizeVector
         nrl = full_length(VI)
     else
         nrl = :nrl
-        push!(q.args, :($nrl = :(number_not_structurally_zero(a))))
+        push!(q.args, :($nrl = :(number_not_structurally_zero(x))))
     end
     ncol, nrl, q
 end
 
-@generated function expand_by_x(x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,T,VI,VT}
+@generated function expand_by_x(x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,T,I,VI,VT}
     ncol, nrl, q = expand_contract_prequote(VI, VT)
     expand_by_x_quote!(q, N, ncol, nrl, T, false)
 end
-@generated function contract_by_x(x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,T,VI,VT}
+@generated function contract_by_x(x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,T,I,VI,VT}
     ncol, nrl, q = expand_contract_prequote(VI, VT)
     contract_by_x_quote!(q, N, ncol, nrl, T, false)
 end
-@generated function expand_by_x(sptr::StackPointer, x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,T,VI,VT}
+function expand_by_x!(b::AbstractVector, x::RaggedMatrix{T,I,VI,VT}, a::AbstractVector) where {T,I,VI,VT}
+    ncol, nrl, q = expand_contract_prequote(VI, VT)
+    contract_by_x_quote!(q, 1, ncol, nrl, T, false, false)
+end
+@generated function expand_by_x(sptr::StackPointer, x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,I,T,VI,VT}
     ncol, nrl, q = expand_contract_prequote(VI, VT)
     expand_by_x_quote!(q, N, ncol, nrl, T, true)
 end
-@generated function contract_by_x(sptr::StackPointer, x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,T,VI,VT}
+@generated function contract_by_x(sptr::StackPointer, x::RaggedMatrix{T,I,VI,VT}, a::Vararg{<:AbstractVector,N}) where {N,I,T,VI,VT}
     ncol, nrl, q = expand_contract_prequote(VI, VT)
     contract_by_x_quote!(q, N, ncol, nrl, T, true)
 end
