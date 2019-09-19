@@ -339,7 +339,7 @@ end
 
 Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
 
-@inline VectorizationBase.vectorizable(A::AbstractMutableDiagMatrix) = VectorizationBase.vpointer(pointer(A))
+@inline VectorizationBase.vectorizable(A::AbstractMutableDiagMatrix) = VectorizationBase.Pointer(pointer(A))
 @inline VectorizationBase.vectorizable(A::AbstractDiagTriangularMatrix) = PaddedMatrices.vStaticPaddedArray(A, 0)
 
 
