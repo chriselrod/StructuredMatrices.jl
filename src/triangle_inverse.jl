@@ -145,9 +145,9 @@ end
 
 
 @generated function Base.:*(
-            t::LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL,PL}},
-            adj::TriangleInverseAdjoint{P,T,L}
-        ) where {P,T,L,M,PL}
+    t::LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL}},
+    adj::TriangleInverseAdjoint{P,T,L}
+) where {P,T,L,M,PL}
     outsize = binomial2(P+1)
     q, storeq = triangle_adjoint_quote(P,T,L,PL)
     quote

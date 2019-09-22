@@ -144,7 +144,7 @@ end
     sp::PaddedMatrices.StackPointer,
     A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB},
-    d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T,PC,PC}}
+    d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T,PC}}
 ) where {M,N,T,PA,PB,PC}
     quote
         d = d′'
