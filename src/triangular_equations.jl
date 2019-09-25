@@ -36,7 +36,7 @@ function A_rdiv_U_kernel_quote(
     if R isa Integer
         W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
         Wm1 = W - 1
-        Riter = R >> Wshift
+        Riter = R >>> Wshift
         Rrem = R & Wm1
         mask = VectorizationBase.mask_from_remainder(T, Rrem)
     else # We assume this is meant to handle a single vector remainder
@@ -263,7 +263,7 @@ function A_rdiv_L_kernel_quote(
     if R isa Integer
         W, Wshift = VectorizationBase.pick_vector_width_shift(R, T)
         Wm1 = W - 1
-        Riter = R >> Wshift
+        Riter = R >>> Wshift
         Rrem = R & Wm1
         mask = VectorizationBase.mask_from_remainder(T, Rrem)
     else # We assume this is meant to handle a single vector remainder
@@ -317,14 +317,14 @@ function A_rdiv_L_kernel_quote(
     if Kmax isa Symbol || (C < Kmax)
         if isU′
             Ltrisym2 = Symbol(:Ltrisym, 2)
-            CtriL = (C*(C+1)) >> 1
+            CtriL = (C*(C+1)) >>> 1
             if K isa Symbol
 #                push!(q.args, :(KpC = $K+$C))
-                #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + ((KpC*(KpC+1))>>1) - (($K*($K+1))>>1))))
+                #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + ((KpC*(KpC+1))>>>1) - (($K*($K+1))>>>1))))
                 push!(q.args, Expr(:(=), Ltrisym2, :($CtriL + $K*$C)))
             else
 #                KpC = K + C
-                #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + $(((KpC*(KpC+1))>>1)-((K*(K+1))>>1)))))
+                #                push!(q.args, Expr(:(=), Ltrisym2, :($Ltrisym + $(((KpC*(KpC+1))>>>1)-((K*(K+1))>>>1)))))
                 push!(q.args, Expr(:(=), Ltrisym2, :($(CtriL + K*C))))
             end
         else
