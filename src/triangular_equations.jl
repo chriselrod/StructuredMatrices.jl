@@ -1,4 +1,4 @@
-using PaddedMatrices: AbstractMutableFixedSizePaddedMatrix
+using PaddedMatrices: AbstractMutableFixedSizeMatrix
 ###
 ### We are solving for A in
 ### B = A * L
@@ -721,7 +721,7 @@ function A_rdiv_U_quote(
     Nl = Nl > NBL ? N : Nl # Don't segfault
     size_T = sizeof(T)
     q = quote
-        invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
+        invdiag = MutableFixedSizeVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
@@ -758,8 +758,8 @@ function A_rdiv_U_quote(
     q    
 end
 @generated function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    C::AbstractMutableFixedSizeMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizeMatrix{M,N,T,AP},
     B::AbstractUpperTriangularMatrix{N,T,NBL}
 #) where {M,N,T,NBL,CP,AP}
 ) where {M,N,T,CP,AP,NBL}
@@ -825,7 +825,7 @@ function A_rdiv_L′_quote(
     size_T = sizeof(T)
     q = quote
         B = Badj.parent
-        invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
+        invdiag = MutableFixedSizeVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
@@ -863,8 +863,8 @@ function A_rdiv_L′_quote(
     q
 end
 @generated function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    C::AbstractMutableFixedSizeMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizeMatrix{M,N,T,AP},
     Badj::Adjoint{T,<:AbstractLowerTriangularMatrix{N,T,NBL}}
 # ) where {M,N,T,CP,AP,NBL}
 ) where {M,N,T,NBL,CP,AP}
@@ -942,7 +942,7 @@ function A_rdiv_L_quote(
     size_T = sizeof(T)
     startoffset = (total_col_iterations-1) * Nk
     q = quote
-        invdiag = MutableFixedSizePaddedVector{$N,$T,$Nl,$Nl}(undef)
+        invdiag = MutableFixedSizeVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
@@ -987,8 +987,8 @@ function A_rdiv_L_quote(
 end
 
 @generated function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    C::AbstractMutableFixedSizeMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizeMatrix{M,N,T,AP},
     B::AbstractLowerTriangularMatrix{N,T,NBL}
 # ) where {M,N,T,CP,AP,NBL}
 ) where {M,N,T,NBL,CP,AP}
@@ -997,8 +997,8 @@ end
     )
 end
 function A_rdiv_B_expr(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T,CP},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T,AP},
+    C::AbstractMutableFixedSizeMatrix{M,N,T,CP},
+    A::AbstractMutableFixedSizeMatrix{M,N,T,AP},
     B::AbstractLowerTriangularMatrix{N,T,NBL}
 ) where {M,N,T,CP,AP,NBL}
 #) where {M,N,T,NBL,CP,AP}
@@ -1009,8 +1009,8 @@ end
 
 
 function A_rdiv_B!(
-    C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-    A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+    C::AbstractMutableFixedSizeMatrix{M,N,T},
+    A::AbstractMutableFixedSizeMatrix{M,N,T},
     B::Adjoint{T,<:AbstractUpperTriangularMatrix{N,T}}
 ) where {M,N,T,CP,AP,NBL}
 #) where {M,N,T,NBL,CP,AP}
@@ -1019,15 +1019,15 @@ end
 
 
 # function A_rdiv_B!(
-#     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-#     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+#     C::AbstractMutableFixedSizeMatrix{M,N,T},
+#     A::AbstractMutableFixedSizeMatrix{M,N,T},
 #     B::AbstractSymmetricMatrixU{N,T}
 # ) where {M,N,T,CP,AP,NBL}
 # #) where {M,N,T,NBL,CP,AP}
 # end
 # function A_rdiv_B!(
-#     C::AbstractMutableFixedSizePaddedMatrix{M,N,T},
-#     A::AbstractMutableFixedSizePaddedMatrix{M,N,T},
+#     C::AbstractMutableFixedSizeMatrix{M,N,T},
+#     A::AbstractMutableFixedSizeMatrix{M,N,T},
 #     B::AbstractSymmetricMatrixL{N,T}
 # ) where {M,N,T,CP,AP,NBL}
 # #) where {M,N,T,NBL,CP,AP}

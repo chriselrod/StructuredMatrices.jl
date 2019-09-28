@@ -1,7 +1,7 @@
 module StructuredMatrices
 
 using SIMDPirates, SLEEFPirates, VectorizationBase, LinearAlgebra, PaddedMatrices, LoopVectorization, StackPointers
-using PaddedMatrices: AbstractFixedSizePaddedVector, AbstractFixedSizePaddedMatrix
+using PaddedMatrices: AbstractFixedSizeVector, AbstractFixedSizeMatrix
 using VectorizationBase: REGISTER_SIZE, REGISTER_COUNT
 
 export addmul!, submul!, inv′, ∂inv′,

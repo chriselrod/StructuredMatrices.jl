@@ -1,8 +1,8 @@
 
 abstract type AbstractBlockDiagonal{M,N,T} <: AbstractMatrix{T} end
 
-struct BlockDiagonalColumnView{M,N,T,P,L,A<:AbstractFixedSizePaddedMatrix{M,N,T,P,L}} <: AbstractBlockDiagonal{M,N,T}
-    data::A#ConstantFixedSizePaddedMatrix{M,N,T,P,L}
+struct BlockDiagonalColumnView{M,N,T,P,L,A<:AbstractFixedSizeMatrix{M,N,T,P,L}} <: AbstractBlockDiagonal{M,N,T}
+    data::A#ConstantFixedSizeMatrix{M,N,T,P,L}
 end
 # function Base.getindex(bd::BlockDiagonalColumnView{M,N,T,P,L}) where {M,N,T,P,L}
 #
@@ -113,8 +113,8 @@ function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
 end
 
 @generated function LinearAlgebra.mul!(
-    c::PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T},
-    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
+    c::PaddedMatrices.AbstractMutableFixedSizeVector{N,T},
+    A::AbstractFixedSizeMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB}
 ) where {M,N,T,PA,PB}
     quote
@@ -123,15 +123,15 @@ end
     end
 end
 function Base.:*(
-    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
+    A::AbstractFixedSizeMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB}
 ) where {M,N,T,PA,PB}
-    c  = MutableFixedSizePaddedVector{N,T}(undef)
+    c  = MutableFixedSizeVector{N,T}(undef)
     mul!(c, A, BD)'
 end
 @generated function Base.:*(
     sp::PaddedMatrices.StackPointer,
-    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
+    A::AbstractFixedSizeMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB}
 ) where {M,N,T,PA,PB}
     P = min(PA,PB)
@@ -142,9 +142,9 @@ end
 end
 @generated function PaddedMatrices.RESERVED_INCREMENT_SEED_RESERVED(
     sp::PaddedMatrices.StackPointer,
-    A::AbstractFixedSizePaddedMatrix{M,N,T,PA},
+    A::AbstractFixedSizeMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB},
-    d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{N,T,PC}}
+    d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizeVector{N,T,PC}}
 ) where {M,N,T,PA,PB,PC}
     quote
         d = d′'

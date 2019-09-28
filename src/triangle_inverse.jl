@@ -145,7 +145,7 @@ end
 
 
 @generated function Base.:*(
-    t::LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizePaddedVector{M,T,PL}},
+    t::LinearAlgebra.Adjoint{T,<: PaddedMatrices.AbstractFixedSizeVector{M,T,PL}},
     adj::TriangleInverseAdjoint{P,T,L}
 ) where {P,T,L,M,PL}
     outsize = binomial2(P+1)
@@ -153,7 +153,7 @@ end
     quote
         @fastmath @inbounds begin
             $q
-            ConstantFixedSizePaddedVector{$outsize,$T}($storeq)'
+            ConstantFixedSizeVector{$outsize,$T}($storeq)'
         end
     end
 end

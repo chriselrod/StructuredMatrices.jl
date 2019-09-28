@@ -85,7 +85,7 @@ end
 end
 function MutableLowerTriangularMatrix(
     B::Union{A,LinearAlgebra.Adjoint{T,A}}
-) where {T,M,A <: AbstractFixedSizePaddedMatrix{M,M,T}}
+) where {T,M,A <: AbstractFixedSizeMatrix{M,M,T}}
     L = MutableLowerTriangularMatrix{M,T}(undef)
     @inbounds for mc ∈ 1:M, mr ∈ mc:M
         L[mr,mc] = B[mr,mc]
@@ -94,7 +94,7 @@ function MutableLowerTriangularMatrix(
 end
 function MutableUpperTriangularMatrix(
     B::Union{A,LinearAlgebra.Adjoint{T,A}}
-) where {T,M,A <: AbstractFixedSizePaddedMatrix{M,M,T}}
+) where {T,M,A <: AbstractFixedSizeMatrix{M,M,T}}
     U = MutableLowerTriangularMatrix{M,T}(undef)
     @inbounds for mc ∈ 1:M, mr ∈ 1:mc
         U[mr,mc] = B[mr,mc]
@@ -160,7 +160,7 @@ end
 struct PtrSymmetricMatrixL{P,T,L} <: AbstractMutableSymmetricMatrixL{P,T,L}
     ptr::Ptr{T}
 end
-# @generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{P,P,T,R}) where {P,T,R}
+# @generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizeMatrix{P,P,T,R}) where {P,T,R}
 #     q = quote end
 #     qa = q.args
 #     PaddedMatrices.load_L_quote!(qa, P, R, :Σ, :Σ)

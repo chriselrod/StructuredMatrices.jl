@@ -49,7 +49,7 @@ end
 #    VectorizationBase.store!(pointer(S) + sizeof(T) * i, v)
 #end
 
-@generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{M,M,T,P}) where {M,T,P}
+@generated function SymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizeMatrix{M,M,T,P}) where {M,T,P}
     Lbase = binomial2(M+1)
     Wm1 = VectorizationBase.pick_vector_width(Lbase, T) - 1
     Lfull = (Lbase + Wm1) & ~Wm1
@@ -68,7 +68,7 @@ end
     end
     :(@inbounds SymmetricMatrixL{$M,$T,$Lfull}($outtup))
 end
-function MutableSymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizePaddedMatrix{M,M,T,P}) where {M,T,P}
+function MutableSymmetricMatrixL(S::PaddedMatrices.AbstractFixedSizeMatrix{M,M,T,P}) where {M,T,P}
     Lbase = binomial2(M+1)
 #    Wm1 = VectorizationBase.pick_vector_width(Lbase, T) - 1
     #    Lfull = (Lbase + Wm1) & ~Wm1
@@ -88,7 +88,7 @@ end
 # end
 
 ### Be more clever than this.
-# @generated function quadform(x::AbstractFixedSizePaddedVector{P,T,R}, Σ::SymmetricMatrixL{P,T,L}) where {P,T,R,L}
+# @generated function quadform(x::AbstractFixedSizeVector{P,T,R}, Σ::SymmetricMatrixL{P,T,L}) where {P,T,R,L}
 #     W = pick_vector_width(P, T)
 #     q = quote
 #         # vout = vbroadcast(Vec{$P,$T}, zero($T))
@@ -108,7 +108,7 @@ end
 #     q
 # end
 
-# @generated function Base.:*(A::AbstractFixedSizePaddedMatrix{M,P,T}, Σ::SymmetricMatrix{P,T,L}) where {M,P,T,L}
+# @generated function Base.:*(A::AbstractFixedSizeMatrix{M,P,T}, Σ::SymmetricMatrix{P,T,L}) where {M,P,T,L}
 #     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
 #
 #     quote

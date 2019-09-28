@@ -7,14 +7,14 @@ import PaddedMatrices: RESERVED_INCREMENT_SEED_RESERVED,
 struct ∂DiagLowerTri∂Diag{M,T,L <: AbstractLowerTriangularMatrix{M,T}}
     data::L
 end
-struct ∂DiagLowerTri∂LowerTri{M,T,V <: AbstractFixedSizePaddedVector{M,T}}
+struct ∂DiagLowerTri∂LowerTri{M,T,V <: AbstractFixedSizeVector{M,T}}
     data::LinearAlgebra.Diagonal{T,V}
 end
 
 @inline function RESERVED_INCREMENT_SEED_RESERVED(
         seedin::AbstractLowerTriangularMatrix,
         jac::∂DiagLowerTri∂Diag,
-        seedout::AbstractFixedSizePaddedVector
+        seedout::AbstractFixedSizeVector
     )
     row_sum_prod_add(seedin, jac.data, seedout)'
 end
@@ -29,7 +29,7 @@ end
 @inline function RESERVED_INCREMENT_SEED_RESERVED(
         seedin::AbstractLowerTriangularMatrix,
         jac::∂DiagLowerTri∂LowerTri,
-        seedout::Union{<:AbstractFixedSizePaddedVector,<:AbstractLowerTriangularMatrix}
+        seedout::Union{<:AbstractFixedSizeVector,<:AbstractLowerTriangularMatrix}
     )
     muladd(jac.data, seedin, seedout)
 end
@@ -42,7 +42,7 @@ end
 
 
 @generated function RESERVED_INCREMENT_SEED_RESERVED(
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T}},
     A::AbstractMutableDiagMatrix{M,T}
 ) where {M,T}
     quote
@@ -59,7 +59,7 @@ end
     sp::StackPointer,
     seedin::AbstractLowerTriangularMatrix,
     jac::∂DiagLowerTri∂Diag,
-    seedout::AbstractFixedSizePaddedVector
+    seedout::AbstractFixedSizeVector
 )
 #    @show seedin
 #    @show jac.data
@@ -83,7 +83,7 @@ end
     sp::StackPointer,
     seedin::AbstractLowerTriangularMatrix,
     jac::∂DiagLowerTri∂LowerTri,
-    seedout::Union{<:AbstractFixedSizePaddedVector,<:AbstractLowerTriangularMatrix}
+    seedout::Union{<:AbstractFixedSizeVector,<:AbstractLowerTriangularMatrix}
 )
 #    @show seedin
 #    @show jac.data
@@ -101,7 +101,7 @@ end
 
 
 #=@generated function RESERVED_INCREMENT_SEED_RESERVED(
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T}},
     A::AbstractMutableDiagMatrix{M,T}
 ) where {M,T}
     quote
@@ -114,7 +114,7 @@ end
 end=#
 @generated function RESERVED_INCREMENT_SEED_RESERVED(
     sp::StackPointer,
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T}},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T}},
     A::AbstractMutableDiagMatrix{M,T}
 ) where {M,T}
     quote

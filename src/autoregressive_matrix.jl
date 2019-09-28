@@ -72,11 +72,11 @@ function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractRange) wher
         ρ, τ, EvenSpacing(ρᵗ, invOmρ²ᵗ, rinvOmρ²ᵗ)#, - ρᵗ * rinvOmρ²ᵗ)
     )
 end
-# @generated function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractFixedSizePaddedVector{M,T,L}) where {M,L,T}
+# @generated function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractFixedSizeVector{M,T,L}) where {M,L,T}
 #     quote
-#         ρᵗ = MutableFixedSizePaddedVector{L,T}(undef)
-#         invOmρ²ᵗ = = MutableFixedSizePaddedVector{L,T}(undef)
-#         rinvOmρ²ᵗ = = MutableFixedSizePaddedVector{L,T}(undef)
+#         ρᵗ = MutableFixedSizeVector{L,T}(undef)
+#         invOmρ²ᵗ = = MutableFixedSizeVector{L,T}(undef)
+#         rinvOmρ²ᵗ = = MutableFixedSizeVector{L,T}(undef)
 #         @vectorize $T for i ∈ 1:$L
 #             ρᵗ[i] = SIMDPirates.vcopysign(SIMDPirates.vpow(SIMDPirates.vabs(ρ),  τ[i] ), ρ[i])
 #             vinvOmρ²ᵗ = 1 / (1 - ρᵗ[i]*ρᵗ[i])
@@ -84,7 +84,7 @@ end
 #             rinvOmρ²ᵗ[i] = sqrt(vinvOmρ²ᵗ)
 #         end
 #         AutoregressiveMatrixLowerCholeskyInverse(
-#             ρ, ConstantFixedSizePaddedVector(ρᵗ), ConstantFixedSizePaddedVector(invOmρ²ᵗ), ConstantFixedSizePaddedVector(rinvOmρ²ᵗ), τ
+#             ρ, ConstantFixedSizeVector(ρᵗ), ConstantFixedSizeVector(invOmρ²ᵗ), ConstantFixedSizeVector(rinvOmρ²ᵗ), τ
 #         )
 #     end
 # end
@@ -96,7 +96,7 @@ function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractVector) whe
         ρ, τ, UnevenSpacing()
     ))
 end
-@inline function AutoregressiveMatrix(ρ::T, τ::AbstractFixedSizePaddedVector{nT,T}) where {nT,T}
+@inline function AutoregressiveMatrix(ρ::T, τ::AbstractFixedSizeVector{nT,T}) where {nT,T}
     AutoregressiveMatrix(ρ, τ, UnevenSpacing())
 end
 function AutoregressiveMatrix(ρ::T, τ::AbstractVector) where {T}
@@ -106,14 +106,14 @@ function AutoregressiveMatrix(ρ::T, τ::AbstractVector) where {T}
     AutoregressiveMatrix(ar.ρ, ar.τ, ar.spacing)
 end
 cache(A::AbstractAutoregressiveMatrix) = A
-@generated function cache(A::AbstractAutoregressiveMatrix{T,V,UnevenSpacing}) where {M,T,L,V <: AbstractFixedSizePaddedVector{M,T,L}}
+@generated function cache(A::AbstractAutoregressiveMatrix{T,V,UnevenSpacing}) where {M,T,L,V <: AbstractFixedSizeVector{M,T,L}}
     quote
         ρ = A.ρ
         τ = A.τ
-        ρᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
-        invOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
-        rinvOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
-        # nρᵗrinvOmρ²ᵗ = MutableFixedSizePaddedVector{$M,$T}(undef)
+        ρᵗ = MutableFixedSizeVector{$M,$T}(undef)
+        invOmρ²ᵗ = MutableFixedSizeVector{$M,$T}(undef)
+        rinvOmρ²ᵗ = MutableFixedSizeVector{$M,$T}(undef)
+        # nρᵗrinvOmρ²ᵗ = MutableFixedSizeVector{$M,$T}(undef)
         if ρ != 0
             absρ = abs(ρ)
             @vectorize $T for i ∈ 1:$L
@@ -138,10 +138,10 @@ cache(A::AbstractAutoregressiveMatrix) = A
         end
         AutoregressiveMatrixLowerCholeskyInverse(
             ρ, τ, CachedUnevenSpacing(
-                ConstantFixedSizePaddedVector(ρᵗ),
-                ConstantFixedSizePaddedVector(invOmρ²ᵗ),
-                ConstantFixedSizePaddedVector(rinvOmρ²ᵗ)#,
-                # ConstantFixedSizePaddedVector(nρᵗrinvOmρ²ᵗ)
+                ConstantFixedSizeVector(ρᵗ),
+                ConstantFixedSizeVector(invOmρ²ᵗ),
+                ConstantFixedSizeVector(rinvOmρ²ᵗ)#,
+                # ConstantFixedSizeVector(nρᵗrinvOmρ²ᵗ)
             )
         )
     end
@@ -245,9 +245,9 @@ function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V <: Abst
     iseven(j - i) ? ρᵗ : copysign(ρᵗ, AR.ρ)
 end
 
-@inline function PaddedMatrices.MutableFixedSizePaddedMatrix(
-        AR::Union{AutoregressiveMatrix{T,<:AbstractFixedSizePaddedVector{M}},AutoregressiveMatrixLowerCholeskyInverse{T,<:AbstractFixedSizePaddedVector{M}}}) where {T,M}
-    pAR = MutableFixedSizePaddedMatrix{M+1,M+1,T}(undef)
+@inline function PaddedMatrices.MutableFixedSizeMatrix(
+        AR::Union{AutoregressiveMatrix{T,<:AbstractFixedSizeVector{M}},AutoregressiveMatrixLowerCholeskyInverse{T,<:AbstractFixedSizeVector{M}}}) where {T,M}
+    pAR = MutableFixedSizeMatrix{M+1,M+1,T}(undef)
     @inbounds for mc ∈ 1:M+1
         for mr ∈ 1:M+1
             pAR[mr,mc] = AR[mr,mc]
@@ -255,15 +255,15 @@ end
     end
     pAR
 end
-function PaddedMatrices.ConstantFixedSizePaddedMatrix(
-        AR::Union{AutoregressiveMatrix{T,<:AbstractFixedSizePaddedVector{M}},AutoregressiveMatrixLowerCholeskyInverse{T,<:AbstractFixedSizePaddedVector{M}}}) where {T,M}
-    ConstantFixedSizePaddedMatrix(MutableFixedSizePaddedMatrix(AR))
+function PaddedMatrices.ConstantFixedSizeMatrix(
+        AR::Union{AutoregressiveMatrix{T,<:AbstractFixedSizeVector{M}},AutoregressiveMatrixLowerCholeskyInverse{T,<:AbstractFixedSizeVector{M}}}) where {T,M}
+    ConstantFixedSizeMatrix(MutableFixedSizeMatrix(AR))
 end
 
 
 @generated function Base.:*(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         ) where {M,N,W,T,R,S}
 
     # register_count = VectorizationBase.REGISTER_COUNT
@@ -288,7 +288,7 @@ end
     end
 
     q = quote
-        AB = MutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}(undef)
+        AB = MutableFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}(undef)
         triind = N
         @inbounds for n ∈ 0:N-1
             AB[ 1 + M*n ] = B[ 1 + M*n ]
@@ -296,7 +296,7 @@ end
                 $loop_body
             end
         end
-        ConstantFixedSizePaddedMatrix(AB)
+        ConstantFixedSizeMatrix(AB)
     end
     if R <: AbstractUnitRange
         pushfirst!(q.args, quote
@@ -372,7 +372,7 @@ end
 
 @generated function quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S}
         ) where {T,R,M,N,W,S}
     V = NTuple{W,Core.VecElement{T}}
@@ -466,8 +466,8 @@ end
 
 @generated function quadformdiff(
             A::AbstractAutoregressiveMatrix{T,R},
-            B::AbstractFixedSizePaddedMatrix{M,N,VoT},
-            C::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,VoT},
+            C::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         ) where {T,R,M,N,W,VoT}
     V = NTuple{W,Core.VecElement{T}}
     q = quote
@@ -527,13 +527,13 @@ end
 
 @generated function mul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         ) where {T,R,M,N,W}
     V = NTuple{W,Core.VecElement{T}}
     q = quote
         $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -578,20 +578,20 @@ end
         end)
     end
 
-    push!(q.args, :(qf, ConstantFixedSizePaddedMatrix(product)))
+    push!(q.args, :(qf, ConstantFixedSizeMatrix(product)))
 
     q
 
 end
 function ∂mul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         ) where {T,R,M,N,W,S}
     V = NTuple{W,Core.VecElement{T}}
     q = quote
         $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -654,7 +654,7 @@ function ∂mul_and_quadform(
         throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
     end
 
-    # push!(q.args, :(qf, ConstantFixedSizePaddedMatrix(product)))
+    # push!(q.args, :(qf, ConstantFixedSizeMatrix(product)))
     # relying on inline to avoid allocations
     push!(q.args, :(qf, product))
 
@@ -669,7 +669,7 @@ function ∂quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
         ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -751,7 +751,7 @@ function ∂quadform_quote(M,N,W,T,R,S)
         throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
     end
 
-    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizePaddedMatrix(product)))
+    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizeMatrix(product)))
     # relying on inlining to avoid allocations.
     # push!(q.args, :(qf, ∂out, product))
 
@@ -760,7 +760,7 @@ end
 
 @generated function ∂quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S}
         ) where {T,R,M,N,W,S}
 
@@ -779,7 +779,7 @@ function selfcrossmul_and_quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
         # ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -861,7 +861,7 @@ function selfcrossmul_and_quadform_quote(M,N,W,T,R,S)
         throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
     end
 
-    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizePaddedMatrix(product)))
+    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizeMatrix(product)))
     # relying on inlining to avoid allocations.
     # push!(q.args, :(qf, ∂out, product))
 
@@ -876,21 +876,21 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 """
 @generated function selfcrossmul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S}
         ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
-        product = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         $(selfcrossmul_and_quadform_quote(M,N,W,T,R,S))
         qf, product
     end
 end
 @generated function selfcrossmul_and_quadform!(
-            product::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            product::PaddedMatrices.AbstractMutableFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S}
         ) where {T,R,M,N,W,S}
 
@@ -908,7 +908,7 @@ function ∂selfcrossmul_and_quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
         ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -990,7 +990,7 @@ function ∂selfcrossmul_and_quadform_quote(M,N,W,T,R,S)
         throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
     end
 
-    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizePaddedMatrix(product)))
+    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizeMatrix(product)))
     # relying on inlining to avoid allocations.
     # push!(q.args, :(qf, ∂out, product))
 
@@ -1005,21 +1005,21 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 """
 @generated function ∂selfcrossmul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S}
         ) where {T,R,M,N,W,S}
 
     quote
         $(Expr(:meta, :inline))
-        product = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         $(∂selfcrossmul_and_quadform_quote(M,N,W,T,R,S))
         qf, ∂out, product
     end
 end
 @generated function ∂selfcrossmul_and_quadform!(
-            product::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            product::PaddedMatrices.AbstractMutableFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S}
         ) where {T,R,M,N,W,S}
 
@@ -1035,7 +1035,7 @@ function ∂selfcrossmuldiff_and_quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
         ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -1117,7 +1117,7 @@ function ∂selfcrossmuldiff_and_quadform_quote(M,N,W,T,R,S)
         throw("Spacing type $S not yet supported. Perhaps try caching intermediate results: `cache(AR_matrix)`")
     end
 
-    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizePaddedMatrix(product)))
+    # push!(q.args, :(qf, -0.5*(SIMDPirates.vsum(∂out)), ConstantFixedSizeMatrix(product)))
     # relying on inlining to avoid allocations.
     # push!(q.args, :(qf, ∂out, product))
 
@@ -1132,23 +1132,23 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 """
 @generated function ∂selfcrossmuldiff_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,VoT},
-            C::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,VoT},
+            C::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,VoT,S}
         ) where {T,R,M,N,W,S,VoT}
 
     quote
         $(Expr(:meta, :inline))
-        product = MutableFixedSizePaddedMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         $(∂selfcrossmuldiff_and_quadform_quote(M,N,W,T,R,S))
         qf, ∂out, product
     end
 end
 @generated function ∂selfcrossmuldiff_and_quadform!(
-            product::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}},
+            product::PaddedMatrices.AbstractMutableFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}},
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,VoT},
-            C::AbstractFixedSizePaddedMatrix{M,N,NTuple{W,Core.VecElement{T}}}
+            B::AbstractFixedSizeMatrix{M,N,VoT},
+            C::AbstractFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}
         # ) where {T,R,M,N,W,S,VoT}
         ) where {T,R,M,N,W,VoT,S}
 
@@ -1164,7 +1164,7 @@ end
 
 @generated function mul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,T}
+            B::AbstractFixedSizeMatrix{M,N,T}
         ) where {T <: Number,R,M,N,S}
 
     W, Wshift = VectorizationBase.pick_vector_width_shift(M-1, T)
@@ -1172,7 +1172,7 @@ end
     q = quote
         $(Expr(:meta, :inline))
         Base.Cartesian.@nexprs $N n -> qf_n = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizePaddedMatrix{$M,$N,$T}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,$T}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -1239,20 +1239,20 @@ end
         end)
     end
 
-    push!(q.args, :(qf, ConstantFixedSizePaddedMatrix(product)))
+    push!(q.args, :(qf, ConstantFixedSizeMatrix(product)))
 
     q
 
 end
 function ∂mul_and_quadform(
             A::AbstractAutoregressiveMatrix{T,R,S},
-            B::AbstractFixedSizePaddedMatrix{M,N,T}
+            B::AbstractFixedSizeMatrix{M,N,T}
         ) where {T <: Number,R,M,N,W,S}
     V = NTuple{W,Core.VecElement{T}}
     q = quote
         $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizePaddedMatrix{$M,$N,$V}(undef)
+        product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -1315,7 +1315,7 @@ function ∂mul_and_quadform(
         throw("Spacing type $S not yet supported. Perhaps cache(AR_matrix) will work.")
     end
 
-    push!(q.args, :(qf, ConstantFixedSizePaddedMatrix(product)))
+    push!(q.args, :(qf, ConstantFixedSizeMatrix(product)))
 
     q
 
@@ -1324,9 +1324,9 @@ end
 
 
 @generated function Base.copyto!(
-    A::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{nT,nT,T,R1},
+    A::PaddedMatrices.AbstractMutableFixedSizeMatrix{nT,nT,T,R1},
     AR::AutoregressiveMatrix{T,VT}
-) where {T,nT,R1,R2,VT <: PaddedMatrices.AbstractFixedSizePaddedVector{nT,T,R2}}
+) where {T,nT,R1,R2,VT <: PaddedMatrices.AbstractFixedSizeVector{nT,T,R2}}
     # We will assume rho > 0
     R = min(R1,R2)
     W, Wshift = VectorizationBase.pick_vector_width_shift(nT, T)

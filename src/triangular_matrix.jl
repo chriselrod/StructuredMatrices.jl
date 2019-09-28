@@ -70,7 +70,7 @@ end
     quote
         $(Expr(:meta,:inline))
         out = zero(T)
-        ∂out = PaddedMatrices.MutableFixedSizePaddedVector{$P,$T}(undef)
+        ∂out = PaddedMatrices.MutableFixedSizeVector{$P,$T}(undef)
         @vectorize $T for i ∈ 1:$P
             out += log(A[i])
             ∂out[i] = one($T) / A[i]
@@ -345,7 +345,7 @@ end
         end
     end
 end
-@generated function lower_chol(Σ::AbstractFixedSizePaddedMatrix{P,P,T,R}) where {P,T,R}
+@generated function lower_chol(Σ::AbstractFixedSizeMatrix{P,P,T,R}) where {P,T,R}
     q = quote end
     qa = q.args
     PaddedMatrices.load_L_quote!(qa, P, R, :Σ, :Σ)
@@ -413,7 +413,7 @@ end
 
 
 @generated function Base.:*(
-            D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
+            D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
             L::AbstractLowerTriangularMatrix{M,T,N}
         ) where {M,T,P,N}
 
@@ -521,7 +521,7 @@ end
 end
 
 @generated function Base.muladd(
-            D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
+            D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
             L::AbstractLowerTriangularMatrix{M,T,N},
             A::AbstractLowerTriangularMatrix{M,T,N}
         ) where {M,T,P,N}
@@ -733,7 +733,7 @@ end
     end
     quote
         $(Expr(:meta,:inline))
-        out = MutableFixedSizePaddedVector{$M,$T}(undef)
+        out = MutableFixedSizeVector{$M,$T}(undef)
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
         vout = VectorizationBase.vectorizable(out)
@@ -747,7 +747,7 @@ end
 @generated function row_sum_prod_add(
         L1::AbstractLowerTriangularMatrix{M,T,N},
         L2::AbstractLowerTriangularMatrix{M,T,N},
-        v::AbstractFixedSizePaddedVector{M,T}) where {M,T,N}
+        v::AbstractFixedSizeVector{M,T}) where {M,T,N}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -842,7 +842,7 @@ end
     end
     quote
         $(Expr(:meta,:inline))
-        out = MutableFixedSizePaddedVector{$M,$T}(undef)
+        out = MutableFixedSizeVector{$M,$T}(undef)
         vv = VectorizationBase.vectorizable(v)
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
@@ -859,7 +859,7 @@ end
 
 @generated function Base.:*(
     sp::StackPointer,
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
     L::AbstractLowerTriangularMatrix{M,T,N}
 ) where {M,T,P,N}
 
@@ -969,7 +969,7 @@ end
 
 @generated function Base.muladd(
     sp::StackPointer,
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizePaddedVector{M,T,P}},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
     L::AbstractLowerTriangularMatrix{M,T,N},
     A::AbstractLowerTriangularMatrix{M,T,N}
 ) where {M,T,P,N}
@@ -1200,7 +1200,7 @@ end
     sp::StackPointer,
     L1::AbstractLowerTriangularMatrix{M,T,N},
     L2::AbstractLowerTriangularMatrix{M,T,N},
-    v::AbstractFixedSizePaddedVector{M,T}
+    v::AbstractFixedSizeVector{M,T}
 ) where {M,T,N}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
@@ -1441,10 +1441,10 @@ end
 @generated function rank_update!(
     Lu::AbstractMutableLowerTriangularMatrix{P,T},
     L::AbstractMutableLowerTriangularMatrix{P,T},
-    a::Union{<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T},T}
+    a::Union{<:PaddedMatrices.AbstractMutableFixedSizeVector{P,T},T}
 ) where {T,P}
     quote
-        x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        x = MutableFixedSizeVector{$P,$T}(undef)
         x .= a
         $(rank_one_updated_lower_triangle_quote(P,T,Lsym = :L, Lusym = :Lu))
         Lu
@@ -1454,7 +1454,7 @@ end
     sptr::StackPointer,
     Lu::AbstractMutableLowerTriangularMatrix{P,T},
     L::AbstractMutableLowerTriangularMatrix{P,T},
-    a::Union{<:PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T},T}
+    a::Union{<:PaddedMatrices.AbstractMutableFixedSizeVector{P,T},T}
 ) where {T,P}
     quote
         x = PtrVector{$P,$T}(pointer(sptr,$T))
@@ -1555,7 +1555,7 @@ function phi_at_b_quote(P, T, load_A = true, store_C = true, halve_diagonal = tr
 end
 
 @generated function PhiAtB!(
-    C::PaddedMatrices.AbstractMutableFixedSizePaddedMatrix{P,P,T},
+    C::PaddedMatrices.AbstractMutableFixedSizeMatrix{P,P,T},
     A::AbstractMutableLowerTriangularMatrix{P,T}, # original chol
     B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
 ) where {P,T}
@@ -1674,7 +1674,7 @@ function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool 
     if track_L
         ### for L
         # if s isa Number
-        #     sv = fill!(MutableFixedSizePaddedVector{8,Float64}(undef), s);
+        #     sv = fill!(MutableFixedSizeVector{8,Float64}(undef), s);
         # else
         #     sv = s
         # end
@@ -1710,7 +1710,7 @@ function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool 
     end
     if track_x
         ### for xscalar
-        # x2p3 = fill!(MutableFixedSizePaddedVector{8,Float64}(undef), s);
+        # x2p3 = fill!(MutableFixedSizeVector{8,Float64}(undef), s);
         # Lu = StructuredMatrices.rank_update(L1, x2p3)
         # StructuredMatrices.reverse_cholesky_grad!(S, Lu, Ladjoint)
         # sumSsub = zero(eltype(S))
@@ -1794,7 +1794,7 @@ end
     sptroffset = sizeof(T) * PL
     quote
         ∂L = PtrLowerTriangularMatrix{$P,$T,$PL}(pointer(sptr,$T))
-        #∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        #∂x = MutableFixedSizeVector{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
         end
@@ -1811,7 +1811,7 @@ end
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
     quote
         ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
-        #∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        #∂x = MutableFixedSizeVector{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
         end
@@ -1824,7 +1824,7 @@ end
     A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
     B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
     Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
-    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+    xinput::PaddedMatrices.AbstractMutableFixedSizeVector{P,T} # original input argument
 ) where {P,T}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = false)
     PL = VectorizationBase.align(binomial2(P+1), T)
@@ -1844,13 +1844,13 @@ end
     A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
     B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
     Linput::AbstractMutableLowerTriangularMatrix{P,T}, # original input argument
-    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+    xinput::PaddedMatrices.AbstractMutableFixedSizeVector{P,T} # original input argument
 ) where {P,T}
 # ) where {T,P}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = false)#, store_S = true)
     quote
         ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
-        ∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        ∂x = MutableFixedSizeVector{$P,$T}(undef)
         # S = MutableLowerTriangularMatrix{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
@@ -1892,7 +1892,7 @@ end
     sptr::StackPointer,
     A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
     B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
-    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+    xinput::PaddedMatrices.AbstractMutableFixedSizeVector{P,T} # original input argument
 ) where {P,T}
     q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = false)
     sptroffset1 = VectorizationBase.align(P*sizeof(T))
@@ -1907,11 +1907,11 @@ end
 @generated function ∂rank_update(
     A::AbstractMutableLowerTriangularMatrix{P,T}, # original output argument
     B::AbstractMutableLowerTriangularMatrix{P,T}, # adjoint
-    xinput::PaddedMatrices.AbstractMutableFixedSizePaddedVector{P,T} # original input argument
+    xinput::PaddedMatrices.AbstractMutableFixedSizeVector{P,T} # original input argument
 ) where {P,T}
     q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = false)
     quote
-        ∂x = MutableFixedSizePaddedVector{$P,$T}(undef)
+        ∂x = MutableFixedSizeVector{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
         end

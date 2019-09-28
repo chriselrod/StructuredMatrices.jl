@@ -15,7 +15,7 @@ struct RaggedMatrix{T,I,VI<:AbstractVector{I},VT<:AbstractVector{T}} <: Abstract
     column_lengths::VI # length(column_lengths) == size(A,2)
     nrow::Int
 end
-const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,MutableFixedSizePaddedVector{NC,I,NC},MutableFixedSizePaddedVector{ND,T,ND}}
+const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,MutableFixedSizeVector{NC,I,NC},MutableFixedSizeVector{ND,T,ND}}
 nrow(A::AbstractRaggedMatrix) = A.nrow
 ncol(A::AbstractRaggedMatrix) = length(A.column_lengths)
 
