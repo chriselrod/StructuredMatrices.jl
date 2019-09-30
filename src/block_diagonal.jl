@@ -9,7 +9,16 @@ end
 # end
 Base.size(::BlockDiagonalColumnView{M,N}) where {M,N} = (M*N,N)
 @inline VectorizationBase.vectorizable(A::BlockDiagonalColumnView) = VectorizationBase.vectorizable(A.data)
-
+function Base.getindex(A::BlockDiagonalColumnView{M,N,T}, i::Int, j::Int) where {M,N,T} # primary purpse is supporting show methods
+    @boundscheck begin
+        (i < 1 || i > (M*N) || j < 1 || j > N) && throw(BoundsError("Attempted to access index ($i,$j) of size $(size(A)) BlockDiagonalColumnView."))
+    end
+    i -= (j-1) * M
+    if i < 1 || i > M
+        return zero(T)
+    end
+    @inbounds A.data[i, j]
+end
 
 function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
     unroll = N > 7 ? 4 : N
@@ -84,7 +93,6 @@ function block_diagonal_column_view_quote(M,N,T,PA,PB,increment::Bool = false)
                   end)
         end
     end
-    
     if rem > 0
         loop_body = quote end
         assignments = quote end
@@ -136,7 +144,7 @@ end
 ) where {M,N,T,PA,PB}
     P = min(PA,PB)
     quote
-        c  = PtrVector{$N,$T,$N,$N}(pointer(sp,$T))
+        c  = PtrVector{$N,$T,$N}(pointer(sp,$T))
         sp + $(sizeof(T)*N), mul!(c, A, BD)'
     end
 end
@@ -148,7 +156,7 @@ end
 ) where {M,N,T,PA,PB,PC}
     quote
         d = d′'
-        c = PtrVector{$N,$T,$N,$N}(pointer(sp,$T))
+        c = PtrVector{$N,$T,$N}(pointer(sp,$T))
         $(block_diagonal_column_view_quote(M,N,T,PA,PB,true))
         sp + $(N*sizeof(T)), c'
     end
