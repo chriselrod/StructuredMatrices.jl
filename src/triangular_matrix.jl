@@ -1468,8 +1468,8 @@ function rank_update(L::AbstractLowerTriangularMatrix{P,T}, a) where {P,T}
     rank_update!(Lu, L, a)
 end
 @generated function rank_update(sptr::StackPointer, L::AbstractLowerTriangularMatrix{P,T,N}, a) where {P,T,N}
-    ptr_offset = VectorizationBase.align(N*sizeof(T))
-    N2 = ptr_offset ÷ sizeof(T)
+    N2 = PaddedMatrices.calc_padding(N)
+    ptr_offset = VectorizationBase.align(N2*sizeof(T))
     quote
         Lu = PtrLowerTriangularMatrix{$P,$T,$N2}(pointer(sptr,$T))
 #        rank_update!(sptr + $(VectorizationBase.align(N*sizeof(T))), Lu, L, a)
@@ -1656,10 +1656,10 @@ end
     B::AbstractMutableLowerTriangularMatrix{P,T} # Adjoint
 ) where {P,T}
     Wm1 = VectorizationBase.pick_vector_width(T) - 1
-    N = (binomial2(P+1) + Wm1) & ~Wm1
+    N = PaddedMatrices.calc_padding(binomial2(P+1))
     quote
         S = PtrLowerTriangularMatrix{$P,$T,$N}(pointer(sptr,$T))
-        sptr + $(sizeof(T)) * $N, spreverse_cholesky_grad!(S, A, B)
+        sptr + $(VectorizationBase.align(sizeof(T) * N)), spreverse_cholesky_grad!(S, A, B)
     end
 end
 
@@ -1790,8 +1790,8 @@ end
 #) where {P,T}
 ) where {T,P}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
-    PL = VectorizationBase.align(binomial2(P+1), T)
-    sptroffset = sizeof(T) * PL
+    PL = PaddedMatrices.calc_padding(binomial2(P+1), T)
+    sptroffset = VectorizationBase.align(sizeof(T) * PL)
     quote
         ∂L = PtrLowerTriangularMatrix{$P,$T,$PL}(pointer(sptr,$T))
         #∂x = MutableFixedSizeVector{$P,$T}(undef)
@@ -1827,9 +1827,9 @@ end
     xinput::PaddedMatrices.AbstractMutableFixedSizeVector{P,T} # original input argument
 ) where {P,T}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = false)
-    PL = VectorizationBase.align(binomial2(P+1), T)
-    sptroffset1 = sizeof(T) * PL
-    sptroffset2 = sptroffset1 + VectorizationBase.align(P*sizeof(T))
+    PL = PaddedMatrices.calc_padding(binomial2(P+1), T)
+    sptroffset1 = VectorizationBase.align(sizeof(T) * PL)
+    sptroffset2 = VectorizationBase.align(sptroffset1 + P*sizeof(T))
     quote
         _sptr = pointer(sptr,$T)
         ∂L = PtrLowerTriangularMatrix{$P,$T,$PL}(_sptr)
@@ -1925,13 +1925,13 @@ end
     Linput::AbstractMutableLowerTriangularMatrix{P,T} # original input argument
 ) where {P,T}
     q = ∂rank_update_quote(P, T, track_L = true, track_x = false)
-    PL = VectorizationBase.align(binomial2(P+1), T)
+    PL = PaddedMatrices.calc_padding(binomial2(P+1), T)
     quote
         ∂L = PtrLowerTriangularMatrix{$P,$T,$PL}(pointer(sptr,$T))
         @inbounds @fastmath begin
             $q
         end
-        sptr + $(PL*sizeof(T)), ∂L
+        sptr + $(VectorizationBase.align(PL*sizeof(T))), ∂L
     end
 end
 @generated function ∂rank_update(

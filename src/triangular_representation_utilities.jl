@@ -31,21 +31,21 @@ struct PtrUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P
 end
 
 function PtrLowerTriangularMatrix{P,T,L}(sp::StackPointer) where {P,T,L}
-    sp + sizeof(T) * L, PtrLowerTriangularMatrix{P,T,L}(pointer(sp, T))
+    sp + VectorizationBase.align(sizeof(T)*L), PtrLowerTriangularMatrix{P,T,L}(pointer(sp, T))
 end
 
-@generated function PtrLowerTriangularMatrix{P,T}(sp::PaddedMatrices.StackPointer) where {P,T}
-    L = binomial2(P+1)
+@generated function PtrLowerTriangularMatrix{P,T}(sp::StackPointer) where {P,T}
+    L = PaddedMatrices.calc_padding(binomial2(P+1),T)
     quote
         A = PtrLowerTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
-        sp + $(L*sizeof(T)), A
+        sp + $(VectorizationBase.align(L*sizeof(T))), A
     end
 end
-@generated function PtrUpperTriangularMatrix{P,T}(sp::PaddedMatrices.StackPointer) where {P,T}
-    L = binomial2(P+1)
+@generated function PtrUpperTriangularMatrix{P,T}(sp::StackPointer) where {P,T}
+    L = PaddedMatrices.calc_padding(binomial2(P+1),T)
     quote
         A = PtrUpperTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
-        sp + $(L*sizeof(T)), A
+        sp + $(VectorizationBase.align(L*sizeof(T))), A
     end
 end
 
