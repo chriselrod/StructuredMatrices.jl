@@ -15,14 +15,20 @@ struct RaggedMatrix{T,I,VI<:AbstractVector{I},VT<:AbstractVector{T}} <: Abstract
     column_lengths::VI # length(column_lengths) == size(A,2)
     nrow::Int
 end
-const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,MutableFixedSizeVector{NC,I,NC},MutableFixedSizeVector{ND,T,ND}}
+struct FixedSizeRaggedMatrix{M,N,P,T,I}
+    data::MutableFixedSizeVector{P,T,P}
+    column_offsets::MutableFixedSizeVector{N,I,N}
+    column_lengths::MutableFixedSizeVector{N,I,N}
+end
+# const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,MutableFixedSizeVector{NC,I,NC},MutableFixedSizeVector{ND,T,ND}}
 nrow(A::AbstractRaggedMatrix) = A.nrow
 ncol(A::AbstractRaggedMatrix) = length(A.column_lengths)
-
+nrow(::FixedSizeRaggedMatrix{M}) where {M} = M
+ncol(::FixedSizeRaggedMatrix{M,N}) where {M,N} = N
 
 Base.size(A::AbstractRaggedMatrix) = (nrow(A),ncol(A))
 number_not_structurally_zero(A::AbstractRaggedMatrix) = length(A.data)
-
+number_not_structurally_zero(A::AbstractRaggedMatrix{M,N,P}) where {M,N,P} = P
 
 @Base.propagate_inbounds Base.getindex(A::AbstractRaggedMatrix, i::Integer) = A.data[i]
 @inline function Base.getindex(A::AbstractRaggedMatrix{T,I}, i::Integer, j::Integer) where {T,I}
@@ -46,6 +52,7 @@ end
         j == ncol(A) && return nothing
         i, j = 1, j+1
     end
+    # k = 1,...,P; i = 1,...,M; j = 1,...,N
     (k, i, j), (k+1, i+1, j)
 end
 
