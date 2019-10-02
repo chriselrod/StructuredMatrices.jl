@@ -15,7 +15,7 @@ struct RaggedMatrix{T,I,VI<:AbstractVector{I},VT<:AbstractVector{T}} <: Abstract
     column_lengths::VI # length(column_lengths) == size(A,2)
     nrow::Int
 end
-struct FixedSizeRaggedMatrix{M,N,P,T,I}
+struct FixedSizeRaggedMatrix{M,N,P,T,I} <: AbstractRaggedMatrix{T,I}
     data::MutableFixedSizeVector{P,T,P}
     column_offsets::MutableFixedSizeVector{N,I,N}
     column_lengths::MutableFixedSizeVector{N,I,N}
@@ -28,7 +28,7 @@ ncol(::FixedSizeRaggedMatrix{M,N}) where {M,N} = N
 
 Base.size(A::AbstractRaggedMatrix) = (nrow(A),ncol(A))
 number_not_structurally_zero(A::AbstractRaggedMatrix) = length(A.data)
-number_not_structurally_zero(A::AbstractRaggedMatrix{M,N,P}) where {M,N,P} = P
+number_not_structurally_zero(::FixedSizeRaggedMatrix{M,N,P}) where {M,N,P} = P
 
 @Base.propagate_inbounds Base.getindex(A::AbstractRaggedMatrix, i::Integer) = A.data[i]
 @inline function Base.getindex(A::AbstractRaggedMatrix{T,I}, i::Integer, j::Integer) where {T,I}
@@ -37,7 +37,7 @@ number_not_structurally_zero(A::AbstractRaggedMatrix{M,N,P}) where {M,N,P} = P
     end
     @inbounds begin
         col_j_offset = A.column_offsets[j] #j == one(j) ? zero(I) : A.column_offsets[j-1]#; col_j_length = A.column_descriptions[j,2]
-        col_j_nextoffset = j == length(A.column_offsets) ? length(A.data) : A.column_offsets[j+1]
+        col_j_nextoffset = j == length(A.column_offsets) ? Base.unsafe_trunc(I, length(A.data)) : A.column_offsets[j+1]
         ind = col_j_offset + Base.unsafe_trunc(I, i)
         col_j_nextoffset >= ind ? A.data[ind] : zero(T)
     end
