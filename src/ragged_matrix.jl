@@ -20,6 +20,17 @@ struct FixedSizeRaggedMatrix{M,N,P,T,I} <: AbstractRaggedMatrix{T,I}
     column_offsets::MutableFixedSizeVector{N,I,N}
     column_lengths::MutableFixedSizeVector{N,I,N}
 end
+function FixedSizeRaggedMatrix{M,N,P}(
+    data::AbstractVector{T},
+    column_offsets::AbstractVector{I},
+    column_lengths::AbstractVector{I}
+) where {M,N,P,T,I}
+    FixedSizeRaggedMatrix{M,N,P,T,I}(
+        MutableFixedSizeVector{P,T,P}(data),
+        MutableFixedSizeVector{N,I,N}(column_offsets),
+        MutableFixedSizeVector{N,I,N}(column_lengths)
+    )    
+end
 # const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,MutableFixedSizeVector{NC,I,NC},MutableFixedSizeVector{ND,T,ND}}
 nrow(A::AbstractRaggedMatrix) = A.nrow
 ncol(A::AbstractRaggedMatrix) = length(A.column_lengths)
