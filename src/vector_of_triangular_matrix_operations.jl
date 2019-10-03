@@ -83,7 +83,7 @@ end
     end
 end
 @inline function vsumvec(triangle::AbstractDiagTriangularMatrix{M,Vec{W,T},L}) where {W,T,M,L}
-    out = MutableFixedSizeVector{L,T}(undef)
+    out = FixedSizeVector{L,T}(undef)
     @inbounds for l ∈ 1:L
         out[l] = SIMDPirates.vsum(triangle[l])
     end
@@ -264,7 +264,7 @@ end
 
     quote
         $(Expr(:meta,:inline))
-        AU = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        AU = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         @inbounds for i in 1:$(M*N)
             AU[i] = vbroadcast(Vec{$W,$T}, zero($T))
         end
@@ -281,7 +281,7 @@ end
 
     quote
         $(Expr(:meta,:inline))
-        AU = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        AU = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         @inbounds for i in 1:$(M*N)
             AU[i] = vbroadcast(Vec{$W,$T}, zero($T))
         end
@@ -505,8 +505,8 @@ end
         ) where {M,N,W,T,L}
     quote
         $(Expr(:meta,:inline))
-        AUt = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
-        # AU = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        AUt = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        # AU = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         @inbounds for i in 1:$(M*N)
             AUt[i] = vbroadcast(Vec{$W,$T}, zero($T))
         end
@@ -522,8 +522,8 @@ end
         ) where {M,N,W,T,L}
     quote
         $(Expr(:meta,:inline))
-        AUt = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
-        # AU = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        AUt = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        # AU = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         @inbounds for i in 1:$(M*N)
             AUt[i] = vbroadcast(Vec{$W,$T}, zero($T))
         end

@@ -70,7 +70,7 @@ end
     quote
         $(Expr(:meta,:inline))
         out = zero(T)
-        ∂out = PaddedMatrices.MutableFixedSizeVector{$P,$T}(undef)
+        ∂out = PaddedMatrices.FixedSizeVector{$P,$T}(undef)
         @vectorize $T for i ∈ 1:$P
             out += log(A[i])
             ∂out[i] = one($T) / A[i]
@@ -733,7 +733,7 @@ end
     end
     quote
         $(Expr(:meta,:inline))
-        out = MutableFixedSizeVector{$M,$T}(undef)
+        out = FixedSizeVector{$M,$T}(undef)
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
         vout = VectorizationBase.vectorizable(out)
@@ -842,7 +842,7 @@ end
     end
     quote
         $(Expr(:meta,:inline))
-        out = MutableFixedSizeVector{$M,$T}(undef)
+        out = FixedSizeVector{$M,$T}(undef)
         vv = VectorizationBase.vectorizable(v)
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
@@ -1444,7 +1444,7 @@ end
     a::Union{<:PaddedMatrices.AbstractMutableFixedSizeVector{P,T},T}
 ) where {T,P}
     quote
-        x = MutableFixedSizeVector{$P,$T}(undef)
+        x = FixedSizeVector{$P,$T}(undef)
         x .= a
         $(rank_one_updated_lower_triangle_quote(P,T,Lsym = :L, Lusym = :Lu))
         Lu
@@ -1674,7 +1674,7 @@ function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool 
     if track_L
         ### for L
         # if s isa Number
-        #     sv = fill!(MutableFixedSizeVector{8,Float64}(undef), s);
+        #     sv = fill!(FixedSizeVector{8,Float64}(undef), s);
         # else
         #     sv = s
         # end
@@ -1710,7 +1710,7 @@ function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool 
     end
     if track_x
         ### for xscalar
-        # x2p3 = fill!(MutableFixedSizeVector{8,Float64}(undef), s);
+        # x2p3 = fill!(FixedSizeVector{8,Float64}(undef), s);
         # Lu = StructuredMatrices.rank_update(L1, x2p3)
         # StructuredMatrices.reverse_cholesky_grad!(S, Lu, Ladjoint)
         # sumSsub = zero(eltype(S))
@@ -1794,7 +1794,7 @@ end
     sptroffset = VectorizationBase.align(sizeof(T) * PL)
     quote
         ∂L = PtrLowerTriangularMatrix{$P,$T,$PL}(pointer(sptr,$T))
-        #∂x = MutableFixedSizeVector{$P,$T}(undef)
+        #∂x = FixedSizeVector{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
         end
@@ -1811,7 +1811,7 @@ end
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = true)
     quote
         ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
-        #∂x = MutableFixedSizeVector{$P,$T}(undef)
+        #∂x = FixedSizeVector{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
         end
@@ -1850,7 +1850,7 @@ end
     q = ∂rank_update_quote(P, T, track_L = true, track_x = true, xscalar = false)#, store_S = true)
     quote
         ∂L = MutableLowerTriangularMatrix{$P,$T}(undef)
-        ∂x = MutableFixedSizeVector{$P,$T}(undef)
+        ∂x = FixedSizeVector{$P,$T}(undef)
         # S = MutableLowerTriangularMatrix{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
@@ -1911,7 +1911,7 @@ end
 ) where {P,T}
     q = ∂rank_update_quote(P, T, track_L = false, track_x = true, xscalar = false)
     quote
-        ∂x = MutableFixedSizeVector{$P,$T}(undef)
+        ∂x = FixedSizeVector{$P,$T}(undef)
         @inbounds @fastmath begin
             $q
         end

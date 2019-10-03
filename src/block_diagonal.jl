@@ -134,7 +134,7 @@ function Base.:*(
     A::AbstractFixedSizeMatrix{M,N,T,PA},
     BD::BlockDiagonalColumnView{M,N,T,PB}
 ) where {M,N,T,PA,PB}
-    c  = MutableFixedSizeVector{N,T}(undef)
+    c  = FixedSizeVector{N,T}(undef)
     mul!(c, A, BD)'
 end
 @generated function Base.:*(

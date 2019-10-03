@@ -16,9 +16,9 @@ struct RaggedMatrix{T,I,VI<:AbstractVector{I},VT<:AbstractVector{T}} <: Abstract
     nrow::Int
 end
 struct FixedSizeRaggedMatrix{M,N,P,T,I} <: AbstractRaggedMatrix{T,I}
-    data::MutableFixedSizeVector{P,T,P}
-    column_offsets::MutableFixedSizeVector{N,I,N}
-    column_lengths::MutableFixedSizeVector{N,I,N}
+    data::FixedSizeVector{P,T,P}
+    column_offsets::FixedSizeVector{N,I,N}
+    column_lengths::FixedSizeVector{N,I,N}
 end
 function FixedSizeRaggedMatrix{M,N,P}(
     data::AbstractVector{T},
@@ -26,12 +26,12 @@ function FixedSizeRaggedMatrix{M,N,P}(
     column_lengths::AbstractVector{I}
 ) where {M,N,P,T,I}
     FixedSizeRaggedMatrix{M,N,P,T,I}(
-        MutableFixedSizeVector{P,T,P}(data),
-        MutableFixedSizeVector{N,I,N}(column_offsets),
-        MutableFixedSizeVector{N,I,N}(column_lengths)
+        FixedSizeVector{P,T,P}(data),
+        FixedSizeVector{N,I,N}(column_offsets),
+        FixedSizeVector{N,I,N}(column_lengths)
     )    
 end
-# const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,MutableFixedSizeVector{NC,I,NC},MutableFixedSizeVector{ND,T,ND}}
+# const FixedSizeRaggedMatrix{T,I,NC,ND} = RaggedMatrix{T,I,FixedSizeVector{NC,I,NC},FixedSizeVector{ND,T,ND}}
 nrow(A::AbstractRaggedMatrix) = A.nrow
 ncol(A::AbstractRaggedMatrix) = length(A.column_lengths)
 nrow(::FixedSizeRaggedMatrix{M}) where {M} = M

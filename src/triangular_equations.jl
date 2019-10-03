@@ -721,7 +721,7 @@ function A_rdiv_U_quote(
     Nl = Nl > NBL ? N : Nl # Don't segfault
     size_T = sizeof(T)
     q = quote
-        invdiag = MutableFixedSizeVector{$N,$T,$Nl,$Nl}(undef)
+        invdiag = FixedSizeVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
@@ -825,7 +825,7 @@ function A_rdiv_L′_quote(
     size_T = sizeof(T)
     q = quote
         B = Badj.parent
-        invdiag = MutableFixedSizeVector{$N,$T,$Nl,$Nl}(undef)
+        invdiag = FixedSizeVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end
@@ -942,7 +942,7 @@ function A_rdiv_L_quote(
     size_T = sizeof(T)
     startoffset = (total_col_iterations-1) * Nk
     q = quote
-        invdiag = MutableFixedSizeVector{$N,$T,$Nl,$Nl}(undef)
+        invdiag = FixedSizeVector{$N,$T,$Nl,$Nl}(undef)
         LoopVectorization.@vvectorize $T for n ∈ 1:$Nl
             invdiag[n] = one($T) / B[n]
         end

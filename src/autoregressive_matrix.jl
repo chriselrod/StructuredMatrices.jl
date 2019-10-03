@@ -74,9 +74,9 @@ function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractRange) wher
 end
 # @generated function AutoregressiveMatrixLowerCholeskyInverse(ρ::T, τ::AbstractFixedSizeVector{M,T,L}) where {M,L,T}
 #     quote
-#         ρᵗ = MutableFixedSizeVector{L,T}(undef)
-#         invOmρ²ᵗ = = MutableFixedSizeVector{L,T}(undef)
-#         rinvOmρ²ᵗ = = MutableFixedSizeVector{L,T}(undef)
+#         ρᵗ = FixedSizeVector{L,T}(undef)
+#         invOmρ²ᵗ = = FixedSizeVector{L,T}(undef)
+#         rinvOmρ²ᵗ = = FixedSizeVector{L,T}(undef)
 #         @vectorize $T for i ∈ 1:$L
 #             ρᵗ[i] = SIMDPirates.vcopysign(SIMDPirates.vpow(SIMDPirates.vabs(ρ),  τ[i] ), ρ[i])
 #             vinvOmρ²ᵗ = 1 / (1 - ρᵗ[i]*ρᵗ[i])
@@ -110,10 +110,10 @@ cache(A::AbstractAutoregressiveMatrix) = A
     quote
         ρ = A.ρ
         τ = A.τ
-        ρᵗ = MutableFixedSizeVector{$M,$T}(undef)
-        invOmρ²ᵗ = MutableFixedSizeVector{$M,$T}(undef)
-        rinvOmρ²ᵗ = MutableFixedSizeVector{$M,$T}(undef)
-        # nρᵗrinvOmρ²ᵗ = MutableFixedSizeVector{$M,$T}(undef)
+        ρᵗ = FixedSizeVector{$M,$T}(undef)
+        invOmρ²ᵗ = FixedSizeVector{$M,$T}(undef)
+        rinvOmρ²ᵗ = FixedSizeVector{$M,$T}(undef)
+        # nρᵗrinvOmρ²ᵗ = FixedSizeVector{$M,$T}(undef)
         if ρ != 0
             absρ = abs(ρ)
             @vectorize $T for i ∈ 1:$L
@@ -245,9 +245,9 @@ function Base.getindex(AR::AutoregressiveMatrix{T,V,S}, i, j) where {T,V <: Abst
     iseven(j - i) ? ρᵗ : copysign(ρᵗ, AR.ρ)
 end
 
-@inline function PaddedMatrices.MutableFixedSizeMatrix(
+@inline function PaddedMatrices.FixedSizeMatrix(
         AR::Union{AutoregressiveMatrix{T,<:AbstractFixedSizeVector{M}},AutoregressiveMatrixLowerCholeskyInverse{T,<:AbstractFixedSizeVector{M}}}) where {T,M}
-    pAR = MutableFixedSizeMatrix{M+1,M+1,T}(undef)
+    pAR = FixedSizeMatrix{M+1,M+1,T}(undef)
     @inbounds for mc ∈ 1:M+1
         for mr ∈ 1:M+1
             pAR[mr,mc] = AR[mr,mc]
@@ -257,7 +257,7 @@ end
 end
 function PaddedMatrices.ConstantFixedSizeMatrix(
         AR::Union{AutoregressiveMatrix{T,<:AbstractFixedSizeVector{M}},AutoregressiveMatrixLowerCholeskyInverse{T,<:AbstractFixedSizeVector{M}}}) where {T,M}
-    ConstantFixedSizeMatrix(MutableFixedSizeMatrix(AR))
+    ConstantFixedSizeMatrix(FixedSizeMatrix(AR))
 end
 
 
@@ -288,7 +288,7 @@ end
     end
 
     q = quote
-        AB = MutableFixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}(undef)
+        AB = FixedSizeMatrix{M,N,NTuple{W,Core.VecElement{T}}}(undef)
         triind = N
         @inbounds for n ∈ 0:N-1
             AB[ 1 + M*n ] = B[ 1 + M*n ]
@@ -533,7 +533,7 @@ end
     q = quote
         $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        product = FixedSizeMatrix{$M,$N,$V}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -591,7 +591,7 @@ function ∂mul_and_quadform(
     q = quote
         $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        product = FixedSizeMatrix{$M,$N,$V}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -669,7 +669,7 @@ function ∂quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        # product = FixedSizeMatrix{$M,$N,$V}(undef)
         ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -779,7 +779,7 @@ function selfcrossmul_and_quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        # product = FixedSizeMatrix{$M,$N,$V}(undef)
         # ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -882,7 +882,7 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 
     quote
         $(Expr(:meta, :inline))
-        product = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        product = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         $(selfcrossmul_and_quadform_quote(M,N,W,T,R,S))
         qf, product
     end
@@ -908,7 +908,7 @@ function ∂selfcrossmul_and_quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        # product = FixedSizeMatrix{$M,$N,$V}(undef)
         ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -1011,7 +1011,7 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 
     quote
         $(Expr(:meta, :inline))
-        product = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        product = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         $(∂selfcrossmul_and_quadform_quote(M,N,W,T,R,S))
         qf, ∂out, product
     end
@@ -1035,7 +1035,7 @@ function ∂selfcrossmuldiff_and_quadform_quote(M,N,W,T,R,S)
     q = quote
         # $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        # product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        # product = FixedSizeMatrix{$M,$N,$V}(undef)
         ∂out = SIMDPirates.vbroadcast($V, zero($T))
     end
     if R <: AbstractUnitRange
@@ -1139,7 +1139,7 @@ returns: qf, -0.5* ∂qf/∂ρ, A(ρ)' * D
 
     quote
         $(Expr(:meta, :inline))
-        product = MutableFixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
+        product = FixedSizeMatrix{$M,$N,NTuple{$W,Core.VecElement{$T}}}(undef)
         $(∂selfcrossmuldiff_and_quadform_quote(M,N,W,T,R,S))
         qf, ∂out, product
     end
@@ -1172,7 +1172,7 @@ end
     q = quote
         $(Expr(:meta, :inline))
         Base.Cartesian.@nexprs $N n -> qf_n = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizeMatrix{$M,$N,$T}(undef)
+        product = FixedSizeMatrix{$M,$N,$T}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
@@ -1252,7 +1252,7 @@ function ∂mul_and_quadform(
     q = quote
         $(Expr(:meta, :inline))
         qf = SIMDPirates.vbroadcast($V, zero($T))
-        product = MutableFixedSizeMatrix{$M,$N,$V}(undef)
+        product = FixedSizeMatrix{$M,$N,$V}(undef)
     end
     if R <: AbstractUnitRange
         push!(q.args, quote
