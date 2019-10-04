@@ -127,4 +127,13 @@ end=#
     end
 end
 
-
+function RESERVED_INCREMENT_SEED_RESERVED(
+    sp::StackPointer,
+    A::AbstractLowerTriangularMatrix{P,T,L},
+    B::AbstractLowerTriangularMatrix{P,T,L}
+) where {P,T,L}
+    @inbounds @simd for l in 1:L
+        B[l] += A[l]
+    end
+    sp, B
+end
