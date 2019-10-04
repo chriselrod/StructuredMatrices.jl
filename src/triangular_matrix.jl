@@ -43,7 +43,7 @@ end
 @generated function LinearAlgebra.det(A::AbstractTriangularMatrix{P,T,L}) where {P,T,L}
     quote
         out = one(T)
-        @vectorize for i ∈ 1:$P
+        @vvectorize for i ∈ 1:$P
             out *= A[i]
         end
         out
@@ -59,7 +59,7 @@ for large matrices.
     quote
         $(Expr(:meta,:inline))
         out = zero(T)
-        @vectorize $T for i ∈ 1:$P
+        @vvectorize $T for i ∈ 1:$P
             out += log(A[i])
         end
         out
@@ -71,7 +71,7 @@ end
         $(Expr(:meta,:inline))
         out = zero(T)
         ∂out = PaddedMatrices.FixedSizeVector{$P,$T}(undef)
-        @vectorize $T for i ∈ 1:$P
+        @vvectorize $T for i ∈ 1:$P
             out += log(A[i])
             ∂out[i] = one($T) / A[i]
         end
@@ -279,7 +279,6 @@ function ∂inv_L_core_quote!(qa, P, output = :L, input = :S, ::Type{T} = Float6
             # else
             #     throw("oops, $(∂sym(output, r, c, input, c, c)) ∈ $defined_syms")
             # end
-
             push!(qa, :( $(∂sym(output, c, r, input, r, r)) =  - $(sym(output, c, c)) * $(sym(input, r, c)) * $(∂sym(output, r, r, input, r, r)) ) )
             push!(outrc_vec, (∂sym(output, c, r, input, r, r), sym(input, r, r)) )
             push!(outrc_vec, (∂sym(output, c, r, input, c, c), sym(input, c, c)) )
