@@ -13,7 +13,7 @@ export addmul!, submul!, inv′, ∂inv′,
 @inline binomial2(n::UInt) = (n*(n-1)) >> 1
 @inline binomial2(n::Int) = reinterpret(Int, binomial2(reinterpret(UInt, n)))
 
-include("static_ranges.jl")
+# include("static_ranges.jl")
 include("triangular_representation_utilities.jl")
 include("symmetric_matrix.jl")
 include("triangular_matrix.jl")
