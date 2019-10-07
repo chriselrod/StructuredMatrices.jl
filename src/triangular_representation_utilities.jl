@@ -208,6 +208,43 @@ end
         MutableSymmetricMatrixU{$P,$T,$L}(undef)
     end
 end
+function Base.copyto!(L::AbstractLowerTriangularMatrix{M,T}, A::AbstractMatrix{T}) where {M,T}
+    @boundscheck begin
+        N, P = size(A)
+        @assert M == N == P
+    end
+    @inbounds for m in 1:M
+        L[m] = A[m,m]
+    end
+    ind = M
+    for c in 1:M
+        for r in c+1:M
+            ind += 1
+            L[ind] = A[r, c]
+        end
+    end
+    L
+end
+function MutableLowerTriangularMatrix(A::AbstractMatrix{T}) where {T}
+    @assert size(A,1) == size(A,2) "Matrix of size $(size(A)) is not square."
+    M = size(A,1)
+    L = MutableLowerTriangularMatrix{M,T}(undef)
+    copyto!(L, A)
+    L
+end
+function MutableLowerTriangularMatrix{M}(A::AbstractMatrix{T}) where {M,T}
+    @assert M == size(A,1) == size(A,2) "Matrix of size $(size(A)) is not a square $M x $M matrix."
+    L = MutableLowerTriangularMatrix{M,T}(undef)
+    copyto!(L, A)
+    L
+end
+function MutableLowerTriangularMatrix{M,T}(A::AbstractMatrix) where {M,T}
+    @assert M == size(A,1) == size(A,2) "Matrix of size $(size(A)) is not a square $M x $M matrix."
+    L = MutableLowerTriangularMatrix{M,T}(undef)
+    copyto!(L, A)
+    L
+end
+
 
 const AbstractMutableDiagMatrix{P,T,L} = Union{
     MutableLowerTriangularMatrix{P,T,L},
