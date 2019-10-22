@@ -38,13 +38,13 @@ function A_rdiv_U_kernel_quote(
         Wm1 = W - 1
         Riter = R >>> Wshift
         Rrem = R & Wm1
-        mask = VectorizationBase.mask_from_remainder(T, Rrem)
+        mask = VectorizationBase.mask(T, Rrem)
     else # We assume this is meant to handle a single vector remainder
         W, Wshift = VectorizationBase.pick_vector_width_shift(T)
         Wm1 = W - 1
         Riter = 0
         Rrem = 1
-        mask = maskexpr# :(VectorizationBase.mask_from_remainder($T, $R & $Wm1))
+        mask = maskexpr# :(VectorizationBase.mask($T, $R & $Wm1))
     end
     q = quote end
     if loadB
@@ -265,13 +265,13 @@ function A_rdiv_L_kernel_quote(
         Wm1 = W - 1
         Riter = R >>> Wshift
         Rrem = R & Wm1
-        mask = VectorizationBase.mask_from_remainder(T, Rrem)
+        mask = VectorizationBase.mask(T, Rrem)
     else # We assume this is meant to handle a single vector remainder
         W, Wshift = VectorizationBase.pick_vector_width_shift(T)
         Wm1 = W - 1
         Riter = 0
         Rrem = 1
-        mask = maskexpr #:(VectorizationBase.mask_from_remainder($T, $R & $Wm1))
+        mask = maskexpr #:(VectorizationBase.mask($T, $R & $Wm1))
     end
     V = Vec{W,T}
     q = quote end
