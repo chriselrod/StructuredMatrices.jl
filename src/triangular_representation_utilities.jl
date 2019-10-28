@@ -30,6 +30,20 @@ struct PtrUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P
     ptr::Ptr{T}
 end
 
+struct UninitializedLowerTriangularMatrix{P,T,L} <: AbstractMutableLowerTriangularMatrix{P,T,L}
+    ptr::Ptr{T}
+end
+struct UninitializedUpperTriangularMatrix{P,T,L} <: AbstractMutableUpperTriangularMatrix{P,T,L}
+    ptr::Ptr{T}
+end
+@inline function ReverseDiffExpressionsBase.uninitialized(L::AbstractMutableLowerTriangularMatrix{P,T,N}) where {P,T,N}
+    UninitializedLowerTriangularMatrix{P,T,N}(pointer(L))
+end
+@inline function ReverseDiffExpressionsBase.uninitialized(U::AbstractMutableUpperTriangularMatrix{P,T,N}) where {P,T,N}
+    UninitializedUpperTriangularMatrix{P,T,N}(pointer(U))
+end
+ReverseDiffExpressionsBase.isinitialized(::Type{<:UninitializedLowerTriangularMatrix}) = false
+ReverseDiffExpressionsBase.isinitialized(::Type{<:UninitializedUpperTriangularMatrix}) = false
 function PtrLowerTriangularMatrix{P,T,L}(sp::StackPointer) where {P,T,L}
     sp + VectorizationBase.align(sizeof(T)*L), PtrLowerTriangularMatrix{P,T,L}(pointer(sp, T))
 end
@@ -46,6 +60,60 @@ end
     quote
         A = PtrUpperTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
         sp + $(VectorizationBase.align(L*sizeof(T))), A
+    end
+end
+@generated function ReverseDiffExpressionsBase.alloc_adjoint(
+    L::AbstractMutableLowerTriangularMatrix{P,T}
+) where {P,T}
+    N = PaddedMatrices.calc_padding(binomial2(N+1), T)
+    quote
+        $(Expr(:meta,:inline))
+        MutableLowerTriangularMatrix{$P,$T,$N}(undef)
+    end
+end
+@generated function ReverseDiffExpressionsBase.alloc_adjoint(
+    L::AbstractMutableUpperTriangularMatrix{P,T}
+) where {P,T}
+    N = PaddedMatrices.calc_padding(binomial2(N+1), T)
+    quote
+        $(Expr(:meta,:inline))
+        MutableUpperTriangularMatrix{$P,$T,$N}(undef)
+    end
+end
+@generated function ReverseDiffExpressionsBase.alloc_adjoint(
+    ptr::Ptr{T}, L::AbstractMutableLowerTriangularMatrix{P,T}
+) where {P,T}
+    N = binomial2(N+1)
+    quote
+        $(Expr(:meta,:inline))
+        PtrLowerTriangularMatrix{$P,$T,$N}(ptr)
+    end
+end
+@generated function ReverseDiffExpressionsBase.alloc_adjoint(
+    ptr::Ptr{T}, L::AbstractMutableUpperTriangularMatrix{P,T}
+) where {P,T}
+    N = binomial2(N+1)
+    quote
+        $(Expr(:meta,:inline))
+        PtrUpperTriangularMatrix{$P,$T,$N}(ptr)
+    end
+end
+@generated function ReverseDiffExpressionsBase.alloc_adjoint(
+    ptr::StackPointer, L::AbstractMutableLowerTriangularMatrix{P,T}
+) where {P,T}
+    N = PaddedMatrices.calc_padding(binomial2(N+1), T)
+    quote
+        $(Expr(:meta,:inline))
+        PtrLowerTriangularMatrix{$P,$T,$N}(ptr)
+    end
+end
+@generated function ReverseDiffExpressionsBase.alloc_adjoint(
+    ptr::StackPointer, L::AbstractMutableUpperTriangularMatrix{P,T}
+) where {P,T}
+    N = PaddedMatrices.calc_padding(binomial2(N+1), T)
+    quote
+        $(Expr(:meta,:inline))
+        PtrUpperTriangularMatrix{$P,$T,$N}(ptr)
     end
 end
 

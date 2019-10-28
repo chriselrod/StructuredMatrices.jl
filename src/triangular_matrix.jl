@@ -125,11 +125,11 @@ end
 #     W, Wshift = VectorizationBase.pick_vector_width_shift(P, T)
 #     Wm1 = W - 1
 #     PpWm1 = P + Wm1
-#     num_diag_loads = PpWm1 >> Wshift
+#     num_diag_loads = PpWm1 >>> Wshift
 #     num_diag_loads == 1 && return lower_chol_small(P, T, L)
 #     rem = P & Wm1
 #     # num_diag_loads == 1 && return lower_chol_small(P, T, L)
-#     num_full_diag_loads = P >> Wshift
+#     num_full_diag_loads = P >>> Wshift
 #     # Do we start with the full number of loads, or not?
 #     # initial_diag_ind = lower_triangle_sub2ind(Val(P), T, 1, 1)
 #     V = Vec{W,T}
@@ -409,22 +409,19 @@ end
     end
 end
 
-
-
-@generated function Base.:*(
-            D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-            L::AbstractLowerTriangularMatrix{M,T,N}
-        ) where {M,T,P,N}
-
+@generated function LinearAlgebra.mul!(
+    out::AbstractMutableLowerTriangularMatrix{M,T,N},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
-
     # handle rem first
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
@@ -434,12 +431,10 @@ end
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
         # so seems like this is safer.
-
         miss = Wrem - rem
         base_ind = - miss
         triangle_ind = base_ind
         increment = M - 1
-
         initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
@@ -465,7 +460,6 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
     full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
@@ -503,7 +497,6 @@ end
     quote
         $(Expr(:meta,:inline))
         d = D.diag
-        out = MutableLowerTriangularMatrix{$M,$T,$N}(undef)
         vD = VectorizationBase.vectorizable(d)
         vL = VectorizationBase.vectorizable(L)
         vout = VectorizationBase.vectorizable(out)
@@ -512,6 +505,21 @@ end
         end
         out
     end
+end
+function Base.:*(
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+    out = MutableLowerTriangularMatrix{M,T,N}(undef)
+    mul!(out, D, L)
+end
+function Base.:*(
+    sp::StackPointer,
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+    sp, out = PtrLowerTriangularMatrix{M,T,N}(sp)
+    sp, mul!(out, D, L)
 end
 
 @generated function Base.muladd(
@@ -525,7 +533,7 @@ end
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
     # handle rem first
     if rem > 0
@@ -634,7 +642,7 @@ end
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
     # handle rem first
     if rem > 0
@@ -738,7 +746,7 @@ end
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
     # handle rem first
     if rem > 0
@@ -831,123 +839,15 @@ end
 end
 
 
-
-
-@generated function Base.:*(
-    sp::StackPointer,
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
-    W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
-    V = Vec{W,T}
-    Wm1 = W - 1
-#    q = quote @show D;  @show L  end
-    q = quote end
-    # Now, what remains of L is a (M-1) x (M-1) lower triangle
-    # we will do W of these at a time.
-    reps = M >> Wshift
-    rem = M & Wm1
-    # handle rem first
-    if rem > 0
-        # If rem is smaller than half of W, we may use a smaller vector size here
-        Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = (one(UInt) << Wrem) - one(UInt)
-        rem_mask_type = VectorizationBase.mask_type(rem)
-        # could be typemax(UInt) ???
-        # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
-        # so seems like this is safer.
-        miss = Wrem - rem
-        base_ind = - miss
-        triangle_ind = base_ind
-        increment = M - 1
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
-        push!(q.args, quote
-            vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
-            vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
-            SIMDPirates.vstore!(vout + $base_ind, SIMDPirates.vmul(vd, vl), $initial_mask)
-        end)
-        triangle_ind += increment
-        increment -= 1
-        for r ∈ 1:rem-1
-            vl = Symbol(:vl_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
-            push!(q.args, quote
-                $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
-                SIMDPirates.vstore!(
-                    vout + $triangle_ind,
-                    SIMDPirates.vmul(vd, $vl), $mask
-                )
-            end)
-            triangle_ind += increment
-            increment -= 1
-        end
-        base_ind = rem
-    else
-        base_ind = 0
-    end
-    # then do reps of W
-    full_mask = (one(UInt) << W) - one(UInt)
-    if reps > 0
-        rem_quote = quote end
-        mask_type = VectorizationBase.mask_type(W)
-        for w ∈ 1:Wm1
-            vl = Symbol(:vld1_,w)
-            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
-            push!(rem_quote.args, quote
-                $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
-                SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, $vl), $mask)
-                triangle_ind += increment
-                increment -= 1
-            end)
-        end
-        push!(q.args, quote
-            for rep ∈ 0:$(reps-1)
-                col1ind = $base_ind + $W * rep
-                # load diagonals
-                vd = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vD + col1ind )
-                vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
-                SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmul(vd, vl))
-                triangle_ind = col1ind + $(M-1)
-                increment = $(M - 2)
-                for r ∈ 0:($(rem-1) + $W*rep)
-                    vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
-                    SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, vli))
-                    triangle_ind += increment
-                    increment -= 1
-                end
-                $rem_quote
-            end
-        end)
-    end
-    quote
-#        $(Expr(:meta,:inline))
-        d = D.diag
-        (sp,out) = PtrLowerTriangularMatrix{$M,$T,$N}(sp)
-        vD = VectorizationBase.vectorizable(d)
-        vL = VectorizationBase.vectorizable(L)
-        vout = VectorizationBase.vectorizable(out)
-
-        GC.@preserve d L begin
-            $q
-        end
-        (sp,out)
-    end
-end
-
-@generated function Base.muladd(
-    sp::StackPointer,
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N},
-    A::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
-
+function muladd_quote(M,T,P,N,Asym = :A)
+    vAsym = Symbol(:v, Asym)
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
 
     # handle rem first
@@ -969,7 +869,7 @@ end
         push!(q.args, quote
             vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
             vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
-            va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vA + $base_ind, $initial_mask )
+            va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, $vAsym + $base_ind, $initial_mask )
             SIMDPirates.vstore!(vout + $base_ind, SIMDPirates.vmuladd(vd, vl, va), $initial_mask)
         end)
         triangle_ind += increment
@@ -980,7 +880,7 @@ end
             mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
-                $va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vA + $triangle_ind, $mask )
+                $va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, $vAsym + $triangle_ind, $mask )
                 SIMDPirates.vstore!(
                     vout + $triangle_ind,
                     SIMDPirates.vmuladd(vd, $vl, $va), $mask
@@ -1005,29 +905,25 @@ end
             mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
-                $va = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vA + triangle_ind, $mask)
+                $va = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, $vAsym + triangle_ind, $mask)
                 SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmuladd(vd, $vl, $va), $mask)
                 triangle_ind += increment
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
                 vd = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vD + col1ind )
                 vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
-                va = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vA + col1ind )
+                va = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, $vAsym + col1ind )
                 SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmuladd(vd, vl, va))
-
                 triangle_ind = col1ind + $(M-1)
                 increment = $(M - 2)
-
                 for r ∈ 0:($(rem-1) + $W*rep)
                     vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
-                    vai = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vA + triangle_ind )
+                    vai = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, $vAsym + triangle_ind )
                     SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmuladd(vd, vli, vai))
                     triangle_ind += increment
                     increment -= 1
@@ -1036,25 +932,52 @@ end
             end
         end)
     end
-    quote
+    q = quote
 #        $(Expr(:meta,:inline))
         d = D.diag
-        (sp,out) = PtrLowerTriangularMatrix{$M,$T,$N}(sp)
         vD = VectorizationBase.vectorizable(d)
         vL = VectorizationBase.vectorizable(L)
-        vA = VectorizationBase.vectorizable(A)
         vout = VectorizationBase.vectorizable(out)
-
         GC.@preserve d L vA begin
             $q
         end
-        (sp,out)
+        out
     end
+    if Asym != :out
+        pushfirst!(q.args, :($vAsym = VectorizationBase.vectorizable($Asym)))
+    end
+    q
 end
 
 
-@generated function row_sum_prod(
+@generated function muladd!(
+    out::AbstractLowerTriangularMatrix{M,T,N},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N},
+    A::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+    muladd_quote(M,T,P,N, :A)
+end
+@generated function muladd!(
+    out::AbstractLowerTriangularMatrix{M,T,N},
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+    muladd_quote(M, T, P, N, :out)
+end
+function Base.muladd(
     sp::StackPointer,
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N},
+    A::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
+    (sp,out) = PtrLowerTriangularMatrix{M,T,N}(sp)
+    muladd!(out, D, L, A)
+    sp, out
+end
+
+@generated function row_sum_prod!(
+    out::PaddedMatrices.AbstractMutableFixedSizeVector{M,T},
     L1::AbstractLowerTriangularMatrix{M,T,N},
     L2::AbstractLowerTriangularMatrix{M,T,N}
 ) where {M,T,N}
@@ -1064,14 +987,13 @@ end
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
-
     # handle rem first
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = ((one(UInt) << Wrem) - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
@@ -1107,7 +1029,6 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
     full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
@@ -1125,12 +1046,10 @@ end
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
-                # load diagonals
+              # load diagonals
                 vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + col1ind )
                 vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + col1ind )
                 vcumulative = SIMDPirates.vmul(vld1, vld2)
@@ -1151,34 +1070,37 @@ end
         end)
     end
     quote
-#        $(Expr(:meta,:inline))
-        (sp,out) = PtrVector{$M,$T}(sp)
+        # $(Expr(:meta,:inline))
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
         vout = VectorizationBase.vectorizable(out)
         GC.@preserve L1 L2 begin
             $q
         end
-        sp,out
+        out
     end
 end
-
-@generated function row_sum_prod_add(
+function row_sum_prod(
     sp::StackPointer,
     L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N},
-    v::AbstractFixedSizeVector{M,T}
+    L2::AbstractLowerTriangularMatrix{M,T,N}
 ) where {M,T,N}
+    (sp, out) = PtrVector{M,T}(sp)
+    row_sum_prod!(out, L1, L2)
+    sp, out
+end
+
+function row_sum_add_quote(M, T, vaddsym = :v)
+    vvaddsym = Symbol(:v, vaddsym)
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
     q = quote end
     # Now, what remains of L is a (M-1) x (M-1) lower triangle
     # we will do W of these at a time.
-    reps = M >> Wshift
+    reps = M >>> Wshift
     rem = M & Wm1
-
-    # handle rem first
+    # handle rem first # why? This misaligns us?
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
@@ -1197,7 +1119,7 @@ end
         push!(q.args, quote
             vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
             vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
-            vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vv + $base_ind, $initial_mask ))
+            vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, $vvaddsym + $base_ind, $initial_mask ))
         end)
         triangle_ind += increment
         increment -= 1
@@ -1218,7 +1140,6 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
     full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
@@ -1228,27 +1149,24 @@ end
             vld1 = Symbol(:vld1_,w)
             vld2 = Symbol(:vld2_,w)
             mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
-            push!(rem_quote.args, quote
+            q_rem = quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)
                 vcumulative = SIMDPirates.vmuladd($vld1, $vld2, vcumulative)
                 triangle_ind += increment
                 increment -= 1
-            end)
+            end
+            push!(rem_quote.args, q_rem)
         end
-
-        push!(q.args, quote
-
+        q_rep = quote
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
                 vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + col1ind )
                 vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + col1ind )
-                vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vv + col1ind))
-
+                vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, $vvaddsym + col1ind))
                 triangle_ind = col1ind + $(M-1)
                 increment = $(M - 2)
-
                 for r ∈ 0:($(rem-1) + $W*rep)
                     vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + triangle_ind )
                     vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + triangle_ind )
@@ -1259,22 +1177,49 @@ end
                 $rem_quote
                 SIMDPirates.vstore!(vout + col1ind, vcumulative)
             end
-        end)
+        end
+        push!(q.args, q_rep)
     end
-    quote
-        $(Expr(:meta,:inline))
-        (sp,out) = PtrVector{$M,$T}(sp)
-        vv = VectorizationBase.vectorizable(v)
+    q = quote
+        # $(Expr(:meta,:inline))
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
         vout = VectorizationBase.vectorizable(out)
         GC.@preserve v L1 L2 out begin
             $q
         end
-        sp,out
+        out
     end
+    if vaddsym != :out
+        pushfirst!(q.args, :($vvaddsym = VectorizationBase.vectorizable($vaddsym)))
+    end
+    q # PaddedMatrices.simplify_expr(q)
 end
-
+@generated function row_sum_prod_add!(
+    out::PaddedMatrices.AbstractMutableFixedSizeVector{M,T},
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N},
+    v::AbstractFixedSizeVector{M,T}
+) where {M,T,N}
+    row_sum_add_quote(M, T, :v)
+end
+@generated function row_sum_prod_add!(
+    out::PaddedMatrices.AbstractMutableFixedSizeVector{M,T},
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,N}
+    row_sum_add_quote(M, T, :out)
+end
+function row_sum_prod_add(
+    sp::StackPointer,
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N},
+    v::AbstractFixedSizeVector{M,T}
+) where {M,T,N}
+    (sp,out) = PtrVector{M,T}(sp)
+    row_sum_prod_add!(out, L1, L2, v1)
+    sp, out
+end
 
 function unrolled_update(
     P::Int, W::Int, Wshift::Int, T::DataType;
@@ -1363,7 +1308,7 @@ function rank_one_updated_lower_triangle_quote(P, T; xsym = :x, xusym = :x, Lsym
     W, Wshift = VectorizationBase.pick_vector_width_shift(P-1,T) # Even with avx512, we'd want W=4 for P=5, or W=2 for P=3,etc.
     Wm1 = W - 1
     V = Vec{W,T}
-    reps = P >> Wshift
+    reps = P >>> Wshift
     rem = P & Wm1
     size_T = sizeof(T)
     xsymp = Symbol(:ptr, xsym)
@@ -1698,11 +1643,11 @@ function ∂rank_update_quote(P, T; track_L::Bool, track_x::Bool, xscalar::Bool 
         if xscalar
             for c ∈ 1:P
                 sumSdiag = Symbol(:sumdiag_, (c-1) & Wm1)
-                assigment = ( ( (c-1) >> Wshift ) == 0 ) ? :(=) : :(+=)
+                assigment = ( ( (c-1) >>> Wshift ) == 0 ) ? :(=) : :(+=)
                 push!(q.args, Expr(assigment, sumSdiag, Symbol(:S_,c,:_,c)))
                 for r ∈ c+1:P
                     sumSsub = Symbol(:sumsub_, indsumsub & Wm1)
-                    assigment = ( ( indsumsub >> Wshift ) == 0 ) ? :(=) : :(+=)
+                    assigment = ( ( indsumsub >>> Wshift ) == 0 ) ? :(=) : :(+=)
                     push!(q.args, Expr(assigment, sumSsub, Symbol(:S_,r,:_,c)))
 #                    push!(q.args, :(@show $(string(assigment)), $sumSsub, $(Symbol(:S_,r,:_,c))))
                     indsumsub += 1
