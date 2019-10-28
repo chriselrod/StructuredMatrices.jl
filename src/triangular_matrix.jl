@@ -429,7 +429,7 @@ end
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
@@ -440,7 +440,7 @@ end
         triangle_ind = base_ind
         increment = M - 1
 
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
             vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
@@ -450,7 +450,7 @@ end
         increment -= 1
         for r ∈ 1:rem-1
             vl = Symbol(:vl_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
                 SIMDPirates.vstore!(
@@ -467,13 +467,13 @@ end
     end
 
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vl = Symbol(:vld1_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
                 SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, $vl), $mask)
@@ -481,19 +481,15 @@ end
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
                 vd = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vD + col1ind )
                 vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
                 SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmul(vd, vl))
-
                 triangle_ind = col1ind + $(M-1)
                 increment = $(M - 2)
-
                 for r ∈ 0:($(rem-1) + $W*rep)
                     vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
                     SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, vli))
@@ -511,7 +507,6 @@ end
         vD = VectorizationBase.vectorizable(d)
         vL = VectorizationBase.vectorizable(L)
         vout = VectorizationBase.vectorizable(out)
-
         GC.@preserve d L out begin
             $q
         end
@@ -520,11 +515,10 @@ end
 end
 
 @generated function Base.muladd(
-            D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-            L::AbstractLowerTriangularMatrix{M,T,N},
-            A::AbstractLowerTriangularMatrix{M,T,N}
-        ) where {M,T,P,N}
-
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
+    L::AbstractLowerTriangularMatrix{M,T,N},
+    A::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,P,N}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -533,12 +527,11 @@ end
     # we will do W of these at a time.
     reps = M >> Wshift
     rem = M & Wm1
-
     # handle rem first
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
@@ -549,7 +542,7 @@ end
         triangle_ind = base_ind
         increment = M - 1
 
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
             vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
@@ -561,7 +554,7 @@ end
         for r ∈ 1:rem-1
             vl = Symbol(:vl_,r)
             va = Symbol(:va_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
                 $va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vA + $triangle_ind, $mask )
@@ -577,16 +570,15 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vl = Symbol(:vl_,w)
             va = Symbol(:va_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
                 $va = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vA + triangle_ind, $mask)
@@ -595,9 +587,7 @@ end
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
@@ -605,10 +595,8 @@ end
                 vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
                 va = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vA + col1ind )
                 SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmuladd(vd, vl, va))
-
                 triangle_ind = col1ind + $(M-1)
                 increment = $(M - 2)
-
                 for r ∈ 0:($(rem-1) + $W*rep)
                     vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
                     vai = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vA + triangle_ind )
@@ -628,7 +616,6 @@ end
         vL = VectorizationBase.vectorizable(L)
         vA = VectorizationBase.vectorizable(A)
         vout = VectorizationBase.vectorizable(out)
-
         GC.@preserve d L vA out begin
             $q
         end
@@ -637,7 +624,10 @@ end
 end
 
 
-@generated function row_sum_prod(L1::AbstractLowerTriangularMatrix{M,T,N},L2::AbstractLowerTriangularMatrix{M,T,N}) where {M,T,N}
+@generated function row_sum_prod(
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N}
+) where {M,T,N}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -646,23 +636,20 @@ end
     # we will do W of these at a time.
     reps = M >> Wshift
     rem = M & Wm1
-
     # handle rem first
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
         # so seems like this is safer.
-
         miss = Wrem - rem
         base_ind = - miss
         triangle_ind = base_ind
         increment = M - 1
-
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
             vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
@@ -673,7 +660,7 @@ end
         for r ∈ 1:rem-1
             vld1 = Symbol(:vld1_,r)
             vld2 = Symbol(:vld2_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $triangle_ind, $mask )
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $triangle_ind, $mask )
@@ -687,16 +674,15 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vld1 = Symbol(:vld1_,w)
             vld2 = Symbol(:vld2_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)
@@ -705,9 +691,7 @@ end
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
@@ -744,9 +728,10 @@ end
 end
 
 @generated function row_sum_prod_add(
-        L1::AbstractLowerTriangularMatrix{M,T,N},
-        L2::AbstractLowerTriangularMatrix{M,T,N},
-        v::AbstractFixedSizeVector{M,T}) where {M,T,N}
+    L1::AbstractLowerTriangularMatrix{M,T,N},
+    L2::AbstractLowerTriangularMatrix{M,T,N},
+    v::AbstractFixedSizeVector{M,T}
+) where {M,T,N}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -755,23 +740,20 @@ end
     # we will do W of these at a time.
     reps = M >> Wshift
     rem = M & Wm1
-
     # handle rem first
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
         # so seems like this is safer.
-
         miss = Wrem - rem
         base_ind = - miss
         triangle_ind = base_ind
         increment = M - 1
-
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
             vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
@@ -782,7 +764,7 @@ end
         for r ∈ 1:rem-1
             vld1 = Symbol(:vld1_,r)
             vld2 = Symbol(:vld2_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, (one(UInt) << (miss+r) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $triangle_ind, $mask )
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $triangle_ind, $mask )
@@ -796,16 +778,15 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vld1 = Symbol(:vld1_,w)
             vld2 = Symbol(:vld2_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)
@@ -814,19 +795,15 @@ end
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
                 vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + col1ind )
                 vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + col1ind )
                 vcumulative = SIMDPirates.vmuladd(vld1, vld2, SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vv + col1ind))
-
                 triangle_ind = col1ind + $(M-1)
                 increment = $(M - 2)
-
                 for r ∈ 0:($(rem-1) + $W*rep)
                     vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL1 + triangle_ind )
                     vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL2 + triangle_ind )
@@ -861,7 +838,6 @@ end
     D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
     L::AbstractLowerTriangularMatrix{M,T,N}
 ) where {M,T,P,N}
-
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     V = Vec{W,T}
     Wm1 = W - 1
@@ -871,23 +847,20 @@ end
     # we will do W of these at a time.
     reps = M >> Wshift
     rem = M & Wm1
-
     # handle rem first
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
         # so seems like this is safer.
-
         miss = Wrem - rem
         base_ind = - miss
         triangle_ind = base_ind
         increment = M - 1
-
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
             vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
@@ -897,7 +870,7 @@ end
         increment -= 1
         for r ∈ 1:rem-1
             vl = Symbol(:vl_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
                 SIMDPirates.vstore!(
@@ -912,15 +885,14 @@ end
     else
         base_ind = 0
     end
-
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vl = Symbol(:vld1_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
                 SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, $vl), $mask)
@@ -928,19 +900,15 @@ end
                 increment -= 1
             end)
         end
-
         push!(q.args, quote
-
             for rep ∈ 0:$(reps-1)
                 col1ind = $base_ind + $W * rep
                 # load diagonals
                 vd = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vD + col1ind )
                 vl = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + col1ind )
                 SIMDPirates.vstore!(vout + col1ind, SIMDPirates.vmul(vd, vl))
-
                 triangle_ind = col1ind + $(M-1)
                 increment = $(M - 2)
-
                 for r ∈ 0:($(rem-1) + $W*rep)
                     vli = SIMDPirates.vload(SIMDPirates.Vec{$W, $T}, vL + triangle_ind )
                     SIMDPirates.vstore!(vout + triangle_ind, SIMDPirates.vmul(vd, vli))
@@ -986,7 +954,7 @@ end
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
@@ -997,7 +965,7 @@ end
         triangle_ind = base_ind
         increment = M - 1
 
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vd = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vD + $base_ind, $initial_mask )
             vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $base_ind, $initial_mask )
@@ -1009,7 +977,7 @@ end
         for r ∈ 1:rem-1
             vl = Symbol(:vl_,r)
             va = Symbol(:va_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL + $triangle_ind, $mask )
                 $va = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vA + $triangle_ind, $mask )
@@ -1027,14 +995,14 @@ end
     end
 
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vl = Symbol(:vl_,w)
             va = Symbol(:va_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vl = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL + triangle_ind, $mask)
                 $va = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vA + triangle_ind, $mask)
@@ -1103,7 +1071,7 @@ end
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = ((one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
@@ -1114,7 +1082,7 @@ end
         triangle_ind = base_ind
         increment = M - 1
 
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
             vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
@@ -1125,7 +1093,7 @@ end
         for r ∈ 1:rem-1
             vld1 = Symbol(:vld1_,r)
             vld2 = Symbol(:vld2_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $triangle_ind, $mask )
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $triangle_ind, $mask )
@@ -1141,14 +1109,14 @@ end
     end
 
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vld1 = Symbol(:vld1_,w)
             vld2 = Symbol(:vld2_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)
@@ -1214,7 +1182,7 @@ end
     if rem > 0
         # If rem is smaller than half of W, we may use a smaller vector size here
         Wrem = VectorizationBase.pick_vector_width(rem, T)
-        full_mask = UInt(2)^Wrem - one(UInt)
+        full_mask = (one(UInt) << Wrem) - one(UInt)
         rem_mask_type = VectorizationBase.mask_type(rem)
         # could be typemax(UInt) ???
         # but "unsafe_trunc" says "arbitrary value" is returned if this is greater
@@ -1225,7 +1193,7 @@ end
         triangle_ind = base_ind
         increment = M - 1
 
-        initial_mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss) - one(UInt)) ⊻ full_mask )
+        initial_mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << miss) - one(UInt)) ⊻ full_mask )
         push!(q.args, quote
             vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $base_ind, $initial_mask )
             vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $base_ind, $initial_mask )
@@ -1236,7 +1204,7 @@ end
         for r ∈ 1:rem-1
             vld1 = Symbol(:vld1_,r)
             vld2 = Symbol(:vld2_,r)
-            mask = Base.unsafe_trunc(rem_mask_type, ((UInt(2))^(miss+r) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(rem_mask_type, ((one(UInt) << (miss+r)) - one(UInt)) ⊻ full_mask )
             push!(q.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL1 + $triangle_ind, $mask )
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$Wrem, $T}, vL2 + $triangle_ind, $mask )
@@ -1252,14 +1220,14 @@ end
     end
 
     # then do reps of W
-    full_mask = UInt(2)^W - one(UInt)
+    full_mask = (one(UInt) << W) - one(UInt)
     if reps > 0
         rem_quote = quote end
         mask_type = VectorizationBase.mask_type(W)
         for w ∈ 1:Wm1
             vld1 = Symbol(:vld1_,w)
             vld2 = Symbol(:vld2_,w)
-            mask = Base.unsafe_trunc(mask_type, ((UInt(2))^(w) - one(UInt)) ⊻ full_mask )
+            mask = Base.unsafe_trunc(mask_type, ((one(UInt) << w) - one(UInt)) ⊻ full_mask )
             push!(rem_quote.args, quote
                 $vld1 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL1 + triangle_ind, $mask)
                 $vld2 = SIMDPirates.vload(SIMDPirates.Vec{$W,$T}, vL2 + triangle_ind, $mask)

@@ -148,16 +148,27 @@ end
         sp + $(sizeof(T)*N), mul!(c, A, BD)'
     end
 end
-@generated function PaddedMatrices.RESERVED_INCREMENT_SEED_RESERVED(
-    sp::PaddedMatrices.StackPointer,
-    A::AbstractFixedSizeMatrix{M,N,T,PA},
+@generated function ReverseDiffExpressionsBase.RESERVED_INCREMENT_SEED_RESERVED!(
+    d::PaddedMatrices.AbstractMutableFixedSizeVector{N,T,PC},
     BD::BlockDiagonalColumnView{M,N,T,PB},
-    d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizeVector{N,T,PC}}
+    A::AbstractFixedSizeMatrix{M,N,T,PA}
 ) where {M,N,T,PA,PB,PC}
     quote
-        d = d′'
-        c = PtrVector{$N,$T,$N}(pointer(sp,$T))
+        c = PtrVector{$N,$T,$PC}(pointer(d))
         $(block_diagonal_column_view_quote(M,N,T,PA,PB,true))
-        sp + $(N*sizeof(T)), c'
+        nothing
     end
 end
+# @generated function PaddedMatrices.RESERVED_INCREMENT_SEED_RESERVED(
+    # sp::PaddedMatrices.StackPointer,
+    # A::AbstractFixedSizeMatrix{M,N,T,PA},
+    # BD::BlockDiagonalColumnView{M,N,T,PB},
+    # d′::LinearAlgebra.Adjoint{T,<:PaddedMatrices.AbstractMutableFixedSizeVector{N,T,PC}}
+# ) where {M,N,T,PA,PB,PC}
+    # quote
+        # d = d′'
+        # c = PtrVector{$N,$T,$N}(pointer(sp,$T))
+        # $(block_diagonal_column_view_quote(M,N,T,PA,PB,true))
+        # sp + $(N*sizeof(T)), c'
+    # end
+# end
