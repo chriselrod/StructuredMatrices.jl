@@ -79,6 +79,8 @@ end
     end
 end
 
+@inline nlogdet(A) = Base.FastMath.sub_fast(logdet(A))
+
 #
 # function lower_chol_small(P,T,L = calculate_L(P, T))
 #     W, Wshift = VectorizationBase.pick_vector_width_shift(P, T)
