@@ -250,12 +250,9 @@ function A_rdiv_L_kernel_quote(
     Astride, Bstride, isU′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
     maskload = true, loadB = true, storeA = true, calc_product::Int = 0,
-    maskexpr = :__mask__
+    maskexpr = :__mask__, increment_store::Bool = false#, store∂βsym::Symbol = :SENTINELNO, store∂Xsym::Symbol = :SENTINELNO
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
-    # if isU′
-    #     throw("Should be false!!!!")
-    # end
     size_T = sizeof(T)
     if isU′
         K = Kmax
@@ -363,15 +360,6 @@ function A_rdiv_L_kernel_quote(
                 $loopbody
             end
         end
-#        jloopend = K isa Symbol ?
-#            ( Kmax isa Symbol ? :($Kmax - $K - $C) : :($(Kmax-C) - $K)) :
-#            ( Kmax isa Symbol ? :($Kmax - $(K + C)) : Kmax - C - K)
-#        mainloop = quote
-#            @inbounds for nj ∈ 1:$jloopend
-#                j = $Kmax - nj
-#                $loopbody
-#            end
-#        end
         push!(q.args, mainloop)
     end
     # Update using just-calculated block
@@ -457,12 +445,33 @@ function A_rdiv_L_kernel_quote(
     # take a break from calc_product while that part of A is still close in memory, in case A === B
     # Store in A
     if storeA
-        for c ∈ 0:C-1
-            for r ∈ 0:Riter-1
-                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(r*W) + $c*$Astride), $(Symbol(:A_,r,:_,c)) ) ))
+        if increment_store
+            for c ∈ 0:C-1
+                for r ∈ 0:Riter-1
+                    tempptrA = gensym(Asym)
+                    astore_q = quote
+                        $tempptrA = $Asym + $size_T * ($(r*W) + $c*$Astride)
+                        SIMDPirates.vstore!( $tempptrA, vadd(vload($V, $tempptrA), $(Symbol(:A_,r,:_,c)) ) )
+                    end
+                    push!(q.args, astore_q ) 
+                end
+                if Rrem > 0
+                    tempptrA = gensym(Asym)
+                    astore_q = quote
+                        $tempptrA = $Asym + $size_T * ($(Riter*W) + $c*$Astride)
+                        SIMDPirates.vstore!( $tempptrA, vadd(vload($V, $tempptrA, $mask), $(Symbol(:A_,Riter,:_,c)), $mask ) )
+                    end
+                    push!(q.args, astore_q)
+                end
             end
-            if Rrem > 0
-                push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(Riter*W) + $c*$Astride), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+        else
+            for c ∈ 0:C-1
+                for r ∈ 0:Riter-1
+                    push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(r*W) + $c*$Astride), $(Symbol(:A_,r,:_,c)) ) ))
+                end
+                if Rrem > 0
+                    push!(q.args, :( SIMDPirates.vstore!( $Asym + $size_T * ($(Riter*W) + $c*$Astride), $(Symbol(:A_,Riter,:_,c)), $mask ) ))
+                end
             end
         end
     end
