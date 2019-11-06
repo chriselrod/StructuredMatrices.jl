@@ -44,11 +44,26 @@ end
         end
     end
 end
-@inline function ∂inv(x)
-    x⁻¹ = inv(x)
-    x⁻² = x⁻¹ * x⁻¹
-    x⁻¹, -x⁻²
+struct ∂Inverse{T}
+    x⁻¹::T
 end
+@inline function ∂inv(x)
+    x⁻¹ = Base.FastMath.inv_fast(x)
+    x⁻¹, ∂Inverse(x⁻¹)
+end
+@inline function ReverseDiffExpressionsBase.RESERVED_INCREMENT_SEED_RESERVED!(
+    c::ReverseDiffExpressionsBase.AbstractUninitializedReference, ∂::∂Inverse, a
+)
+    x⁻¹′ = ∂.x⁻¹'
+    c[] = @fastmath - x⁻¹′ * a * x⁻¹′
+end
+@inline function ReverseDiffExpressionsBase.RESERVED_INCREMENT_SEED_RESERVED!(
+    c, ∂::∂Inverse, a
+)
+    x⁻¹′ = ∂.x⁻¹'
+    @fastmath c[] -= x⁻¹′ * a * x⁻¹′
+end
+
 @generated function ∂inv′(Lt::AbstractLowerTriangularMatrix{P,T,L}) where {P,L,T}
 # @generated function ∂inv(Lt::LowerTriangularMatrix{P,T,L}) where {P,T,L}
     q = quote end
@@ -67,9 +82,8 @@ end
     end
 end
 @inline function ∂inv′(x)
-    x⁻¹ = inv(x)
-    x⁻² = x⁻¹ * x⁻¹
-    x⁻¹, -x⁻²
+    x⁻¹ = Base.FastMath.inv_fast(x)'
+    x⁻¹, ∂Inverse(x⁻¹)
 end
 
 function partial_inv_quote(P,T,L = binomial2(P+1))
