@@ -42,15 +42,19 @@ end
 @inline function ReverseDiffExpressionsBase.uninitialized(U::AbstractMutableUpperTriangularMatrix{P,T,N}) where {P,T,N}
     UninitializedUpperTriangularMatrix{P,T,N}(pointer(U))
 end
+@inline Base.pointer(L::UninitializedLowerTriangularMatrix) = L.ptr
+@inline Base.pointer(U::UninitializedUpperTriangularMatrix) = U.ptr
 ReverseDiffExpressionsBase.isinitialized(::Type{<:UninitializedLowerTriangularMatrix}) = false
 ReverseDiffExpressionsBase.isinitialized(::Type{<:UninitializedUpperTriangularMatrix}) = false
 function PtrLowerTriangularMatrix{P,T,L}(sp::StackPointer) where {P,T,L}
     sp + VectorizationBase.align(sizeof(T)*L), PtrLowerTriangularMatrix{P,T,L}(pointer(sp, T))
 end
 
+
 @generated function PtrLowerTriangularMatrix{P,T}(sp::StackPointer) where {P,T}
     L = PaddedMatrices.calc_padding(binomial2(P+1),T)
     quote
+        $(Expr(:meta,:inline))
         A = PtrLowerTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
         sp + $(VectorizationBase.align(L*sizeof(T))), A
     end
@@ -58,6 +62,7 @@ end
 @generated function PtrUpperTriangularMatrix{P,T}(sp::StackPointer) where {P,T}
     L = PaddedMatrices.calc_padding(binomial2(P+1),T)
     quote
+        $(Expr(:meta,:inline))
         A = PtrUpperTriangularMatrix{$P,$T,$L}(pointer(sp, $T))
         sp + $(VectorizationBase.align(L*sizeof(T))), A
     end
@@ -205,6 +210,21 @@ function MutableUpperTriangularMatrix(A::Matrix{T}) where {T}
     copyto!(U, A)
     U
 end
+
+@inline Base.similar(A::AT) where {AT <: Union{<:AbstractMutableLowerTriangularMatrix,<:AbstractMutableUpperTriangularMatrix}} = AT(undef)
+@inline function Base.similar(A::PtrLowerTriangularMatrix{P,T,L}) where {P,T,L}
+    MutableLowerTriangularMatrix{P,T,L}(undef)
+end
+@inline function Base.similar(sp::StackPointer, A::AbstractLowerTriangularMatrix{P,T,L}) where {P,T,L}
+    PtrLowerTriangularMatrix{P,T,L}(sp)
+end
+@inline function Base.similar(A::PtrUpperTriangularMatrix{P,T,L}) where {P,T,L}
+    MutableUpperTriangularMatrix{P,T,L}(undef)
+end
+@inline function Base.similar(sp::StackPointer, A::AbstractUpperTriangularMatrix{P,T,L}) where {P,T,L}
+    PtrUpperTriangularMatrix{P,T,L}(sp)
+end
+
 
 abstract type AbstractSymmetricMatrix{P,T,L} <: AbstractDiagTriangularMatrix{P,T,L} end
 abstract type AbstractSymmetricMatrixL{P,T,L} <: AbstractSymmetricMatrix{P,T,L} end
