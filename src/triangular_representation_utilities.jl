@@ -88,7 +88,7 @@ end
 @generated function ReverseDiffExpressionsBase.alloc_adjoint(
     ptr::Ptr{T}, L::AbstractMutableLowerTriangularMatrix{P,T}
 ) where {P,T}
-    N = binomial2(N+1)
+    N = binomial2(P+1)
     quote
         $(Expr(:meta,:inline))
         PtrLowerTriangularMatrix{$P,$T,$N}(ptr)
@@ -97,7 +97,7 @@ end
 @generated function ReverseDiffExpressionsBase.alloc_adjoint(
     ptr::Ptr{T}, L::AbstractMutableUpperTriangularMatrix{P,T}
 ) where {P,T}
-    N = binomial2(N+1)
+    N = binomial2(P+1)
     quote
         $(Expr(:meta,:inline))
         PtrUpperTriangularMatrix{$P,$T,$N}(ptr)
@@ -106,7 +106,7 @@ end
 @generated function ReverseDiffExpressionsBase.alloc_adjoint(
     ptr::StackPointer, L::AbstractMutableLowerTriangularMatrix{P,T}
 ) where {P,T}
-    N = PaddedMatrices.calc_padding(binomial2(N+1), T)
+    N = PaddedMatrices.calc_padding(binomial2(P+1), T)
     quote
         $(Expr(:meta,:inline))
         PtrLowerTriangularMatrix{$P,$T,$N}(ptr)
@@ -115,7 +115,7 @@ end
 @generated function ReverseDiffExpressionsBase.alloc_adjoint(
     ptr::StackPointer, L::AbstractMutableUpperTriangularMatrix{P,T}
 ) where {P,T}
-    N = PaddedMatrices.calc_padding(binomial2(N+1), T)
+    N = PaddedMatrices.calc_padding(binomial2(P+1), T)
     quote
         $(Expr(:meta,:inline))
         PtrUpperTriangularMatrix{$P,$T,$N}(ptr)
@@ -335,14 +335,10 @@ end
 
 
 const AbstractMutableDiagMatrix{P,T,L} = Union{
-    MutableLowerTriangularMatrix{P,T,L},
-    MutableUpperTriangularMatrix{P,T,L},
-    MutableSymmetricMatrixL{P,T,L},
-    MutableSymmetricMatrixU{P,T,L},
-    PtrLowerTriangularMatrix{P,T,L},
-    PtrUpperTriangularMatrix{P,T,L},
-    PtrSymmetricMatrixL{P,T,L},
-    PtrSymmetricMatrixU{P,T,L}
+    AbstractMutableLowerTriangularMatrix{P,T,L},
+    AbstractMutableUpperTriangularMatrix{P,T,L},
+    AbstractMutableSymmetricMatrixL{P,T,L},
+    AbstractMutableSymmetricMatrixU{P,T,L}
 }
 
 @inline function Base.getindex(A::AbstractDiagTriangularMatrix{P,T,L}, i::Integer) where {P,T,L}
@@ -465,7 +461,7 @@ end
 Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
 
 @inline VectorizationBase.vectorizable(A::AbstractMutableDiagMatrix) = VectorizationBase.Pointer(pointer(A))
-@inline VectorizationBase.vectorizable(A::AbstractDiagTriangularMatrix) = PaddedMatrices.vStaticPaddedArray(A, 0)
+@inline VectorizationBase.vectorizable(A::AbstractDiagTriangularMatrix) = PaddedMatrices.vStaticPaddedArray(A)
 
 
 # @inline binom2(n::Int) = (nu = reinterpret(UInt, n); reinterpret(Int, (nu*(nu-one(UInt))) >> one(UInt)))

@@ -649,7 +649,10 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
                     ratio = ( ratio * complete_rows * nrow + row_rem * rem_aloads / rem_loads ) / rows
                 end
             end
-#            @show aloads, ncol, ratio
+            # @show aloads, ncol, ratio
+            if cols % ncol == 0
+                ratio *= 1.05
+            end
             ratios[aloads] = ratio
             row_counts[aloads] = nrow
             col_counts[aloads] = ncol
@@ -661,7 +664,7 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
     else
         for aloads in 1:max_aloads
             ncol = div(reg_count - aloads - 1, aloads)
-            ncol = min(cols, ncol)
+            # ncol = min(cols, ncol) # but cols is max, so of course ncol < col?
             nrow = aloads * W
             row_counts[aloads] = nrow
             col_counts[aloads] = ncol
