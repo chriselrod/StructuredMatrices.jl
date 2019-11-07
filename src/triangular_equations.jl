@@ -576,7 +576,9 @@ function div_ul_loads(ncol, aloads, colblock)
 end
 
 not_max(x::T) where {T} = x != typemax(T)
-function div_triangle_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE, verbose = false) where {T}
+function div_triangle_blocking_structure(
+    rows = typemax(UInt), cols = typemax(UInt), ::Type{T} = Float64; reg_count = VectorizationBase.REGISTER_COUNT, reg_size = VectorizationBase.REGISTER_SIZE, verbose = false
+) where {T}
     if cols == typemax(typeof(cols))
         W, rc, cc, mi = PaddedMatrices.pick_kernel_size(T, rows, cols,  W = reg_size ÷ sizeof(T), NREG = reg_count)
         return W, rc, cc
@@ -604,6 +606,9 @@ function div_triangle_blocking_structure(rows = typemax(UInt), cols = typemax(UI
             end
         end
         verbose && @show nrow, ncol, ratio
+        if cols % ncol == 0 # bonus for there being no column remainder.
+            ratio *= 1.05
+        end
         ratios[aloads] = ratio
         row_counts[aloads] = nrow
         col_counts[aloads] = ncol
