@@ -412,10 +412,10 @@ end
 end
 
 @generated function LinearAlgebra.mul!(
-    out::AbstractMutableLowerTriangularMatrix{M,T,N},
+    out::AbstractMutableLowerTriangularMatrix{M,T},
     D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
+    L::AbstractLowerTriangularMatrix{M,T}
+) where {M,T,P}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -510,25 +510,25 @@ end
 end
 function Base.:*(
     D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
-    out = MutableLowerTriangularMatrix{M,T,N}(undef)
+    L::AbstractLowerTriangularMatrix{M,T}
+) where {M,T,P}
+    out = MutableLowerTriangularMatrix{M,T}(undef)
     mul!(out, D, L)
 end
 function Base.:*(
     sp::StackPointer,
     D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
-    sp, out = PtrLowerTriangularMatrix{M,T,N}(sp)
+    L::AbstractLowerTriangularMatrix{M,T}
+) where {M,T,P}
+    sp, out = PtrLowerTriangularMatrix{M,T}(sp)
     sp, mul!(out, D, L)
 end
 
 @generated function Base.muladd(
     D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N},
-    A::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
+    L::AbstractLowerTriangularMatrix{M,T},
+    A::AbstractLowerTriangularMatrix{M,T}
+) where {M,T,P}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -621,7 +621,7 @@ end
     quote
         $(Expr(:meta,:inline))
         d = D.diag
-        out = MutableLowerTriangularMatrix{$M,$T,$N}(undef)
+        out = MutableLowerTriangularMatrix{$M,$T}(undef)
         vD = VectorizationBase.vectorizable(d)
         vL = VectorizationBase.vectorizable(L)
         vA = VectorizationBase.vectorizable(A)
@@ -635,9 +635,9 @@ end
 
 
 @generated function row_sum_prod(
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,N}
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T}
+) where {M,T}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -738,10 +738,10 @@ end
 end
 
 @generated function row_sum_prod_add(
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N},
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T},
     v::AbstractFixedSizeVector{M,T}
-) where {M,T,N}
+) where {M,T}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -969,20 +969,20 @@ end
 end
 function Base.muladd(
     sp::StackPointer,
-    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T,P}},
-    L::AbstractLowerTriangularMatrix{M,T,N},
-    A::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,P,N}
-    (sp,out) = PtrLowerTriangularMatrix{M,T,N}(sp)
+    D::LinearAlgebra.Diagonal{T,<:AbstractFixedSizeVector{M,T}},
+    L::AbstractLowerTriangularMatrix{M,T},
+    A::AbstractLowerTriangularMatrix{M,T}
+) where {M,T}
+    (sp,out) = PtrLowerTriangularMatrix{M,T}(sp)
     muladd!(out, D, L, A)
     sp, out
 end
 
 @generated function row_sum_prod!(
     out::PaddedMatrices.AbstractMutableFixedSizeVector{M,T},
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,N}
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T}
+) where {M,T}
     W, Wshift = VectorizationBase.pick_vector_width_shift(M, T)
     Wm1 = W - 1
     V = Vec{W,T}
@@ -1084,9 +1084,9 @@ end
 end
 function row_sum_prod(
     sp::StackPointer,
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,N}
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T}
+) where {M,T}
     (sp, out) = PtrVector{M,T}(sp)
     row_sum_prod!(out, L1, L2)
     sp, out
@@ -1199,25 +1199,25 @@ function row_sum_add_quote(M, T, vaddsym = :v)
 end
 @generated function row_sum_prod_add!(
     out::PaddedMatrices.AbstractMutableFixedSizeVector{M,T},
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N},
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T},
     v::AbstractFixedSizeVector{M,T}
-) where {M,T,N}
+) where {M,T}
     row_sum_add_quote(M, T, :v)
 end
 @generated function row_sum_prod_add!(
     out::PaddedMatrices.AbstractMutableFixedSizeVector{M,T},
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N}
-) where {M,T,N}
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T}
+) where {M,T}
     row_sum_add_quote(M, T, :out)
 end
 function row_sum_prod_add(
     sp::StackPointer,
-    L1::AbstractLowerTriangularMatrix{M,T,N},
-    L2::AbstractLowerTriangularMatrix{M,T,N},
+    L1::AbstractLowerTriangularMatrix{M,T},
+    L2::AbstractLowerTriangularMatrix{M,T},
     v::AbstractFixedSizeVector{M,T}
-) where {M,T,N}
+) where {M,T}
     (sp,out) = PtrVector{M,T}(sp)
     row_sum_prod_add!(out, L1, L2, v1)
     sp, out
