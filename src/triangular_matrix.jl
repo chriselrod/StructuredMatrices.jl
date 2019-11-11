@@ -940,7 +940,7 @@ function muladd_quote(M,T,P,N,Asym = :A)
         vD = VectorizationBase.vectorizable(d)
         vL = VectorizationBase.vectorizable(L)
         vout = VectorizationBase.vectorizable(out)
-        GC.@preserve d L vA begin
+        GC.@preserve d L out begin
             $q
         end
         out
@@ -1187,7 +1187,7 @@ function row_sum_add_quote(M, T, vaddsym = :v)
         vL1 = VectorizationBase.vectorizable(L1)
         vL2 = VectorizationBase.vectorizable(L2)
         vout = VectorizationBase.vectorizable(out)
-        GC.@preserve v L1 L2 out begin
+        GC.@preserve L1 L2 out begin
             $q
         end
         out
