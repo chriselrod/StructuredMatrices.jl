@@ -8,18 +8,20 @@ end
 struct ∂DiagLowerTri∂LowerTri{M,T,V <: AbstractFixedSizeVector{M,T}}
     data::LinearAlgebra.Diagonal{T,V}
 end
+@inline LinearAlgebra.adjoint(x::∂DiagLowerTri∂Diag) = x
+@inline LinearAlgebra.adjoint(x::∂DiagLowerTri∂LowerTri) = x
 
 @inline function RESERVED_INCREMENT_SEED_RESERVED!(
     seedout::AbstractFixedSizeVector,
-    jac::∂DiagLowerTri∂Diag,
-    seedin::AbstractLowerTriangularMatrix
+    seedin::AbstractLowerTriangularMatrix,
+    jac::∂DiagLowerTri∂Diag
 )
     row_sum_prod_add!(seedout, jac.data, seedin); nothing
 end
 @inline function RESERVED_INCREMENT_SEED_RESERVED!(
     seedout::UninitializedVector,
-    jac::∂DiagLowerTri∂Diag,
-    seedin::AbstractLowerTriangularMatrix
+    seedin::AbstractLowerTriangularMatrix,
+    jac::∂DiagLowerTri∂Diag
 )
     row_sum_prod!(seedout, jac.data, seedin); nothing
 end
