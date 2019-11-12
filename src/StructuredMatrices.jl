@@ -5,6 +5,8 @@ using PaddedMatrices: AbstractFixedSizeVector, AbstractFixedSizeMatrix
 using VectorizationBase: REGISTER_SIZE, REGISTER_COUNT
 using ReverseDiffExpressionsBase
 
+import PaddedMatrices: param_type_length, type_length
+
 export addmul!, submul!, inv′, ∂inv′,
         UpperTriangularMatrix, LowerTriangularMatrix, SymmetricMatrixL,
         AutoregressiveMatrixLowerCholeskyInverse, AutoregressiveMatrix,
