@@ -455,7 +455,9 @@ end
 #
 # end
 
+@generated type_length(::Type{<:AbstractDiagTriangularMatrix{M}}) where {M} = binomial2(M+1)
 @generated type_length(::AbstractDiagTriangularMatrix{P}) where {P} = binomial2(P+1)
+@generated param_type_length(::Type{<:AbstractDiagTriangularMatrix{P}}) where {P} = binomial2(P+1)
 @generated param_type_length(::AbstractDiagTriangularMatrix{P}) where {P} = binomial2(P+1)
 
 Base.size(::AbstractDiagTriangularMatrix{P}) where {P} = (P,P)
@@ -599,5 +601,13 @@ end
     end
 end
 
-@generated PaddedMatrices.type_length(::Type{<:AbstractTriangularMatrix{M}}) where {M} = binomial2(M+1)
+@inline SIMDPirates.lifetime_start!(A::MutableLowerTriangularMatrix) = nothing
+@inline SIMDPirates.lifetime_end!(A::MutableLowerTriangularMatrix) = nothing
+@inline function SIMDPirates.lifetime_start!(A::AbstractMutableLowerTriangularMatrix{M,T,L}) where {M,T,L}
+    SIMDPirates.lifetime_start!(pointer(A), Val{L}())
+end
+@inline function SIMDPirates.lifetime_end!(A::AbstractMutableLowerTriangularMatrix{M,T,L}) where {M,T,L}
+    SIMDPirates.lifetime_end!(pointer(A), Val{L}())
+end
+
 
