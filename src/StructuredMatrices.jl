@@ -13,8 +13,7 @@ export addmul!, submul!, inv′, ∂inv′,
         MutableLowerTriangularMatrix, MutableUpperTriangularMatrix
 
 @noinline ThrowBoundsError(args...) = throw(BoundsError(args...))
-@inline binomial2(n::UInt) = (n*(n-1)) >> 1
-@inline binomial2(n::Int) = reinterpret(Int, binomial2(reinterpret(UInt, n)))
+@inline binomial2(n::Integer) = (n*(n-1)) >>> 1
 
 # include("static_ranges.jl")
 include("triangular_representation_utilities.jl")
