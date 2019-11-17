@@ -250,7 +250,7 @@ function A_rdiv_L_kernel_quote(
     Astride, Bstride, isU′, invdiagptr;
     Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
     maskload = true, loadB = true, storeA = true, calc_product::Int = 0,
-    maskexpr = :__mask__, increment_store::Bool = false#, store∂βsym::Symbol = :SENTINELNO, store∂Xsym::Symbol = :SENTINELNO
+    maskexpr = :__mask__, increment_store::Bool = false, v∂Lstride::Int = VectorizationBase.pick_vector_width(T)#, store∂βsym::Symbol = :SENTINELNO, store∂Xsym::Symbol = :SENTINELNO
 ) where {T}
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
@@ -402,11 +402,11 @@ function A_rdiv_L_kernel_quote(
             # We load elements from v∂L of this column
             # diagonal
             diagv∂L = Symbol(:v∂L_, c, :_, c)
-            push!(q.args, Expr(:(=), diagv∂L, :(vload($V, ptrv∂Ldiag + $(c*size_T*W)))))
+            push!(q.args, Expr(:(=), diagv∂L, :(vload($V, ptrv∂Ldiag + $(c*size_T*v∂Lstride)))))
             # now, the off diagonal
             for cc ∈ c:C-2
                 subdiagv∂L = Symbol(:v∂L_, cc+1, :_, c)
-                push!(q.args, Expr(:(=), subdiagv∂L, :(vload($V, ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc-c - b2c))))))
+                push!(q.args, Expr(:(=), subdiagv∂L, :(vload($V, ptrv∂Ltri + $(size_T*v∂Lstride)*($Kmax*$c + $(cc-c - b2c))))))
             end
             # Now, we load vectors from B one at a time, and multiply
             for r ∈ 0:Riterl
@@ -434,11 +434,11 @@ function A_rdiv_L_kernel_quote(
                 end
             end
             # Now, store the results
-            push!(q.args, :(vstore!(ptrv∂Ldiag + $(c*size_T*W), $diagv∂L)))
+            push!(q.args, :(vstore!(ptrv∂Ldiag + $(c*size_T*v∂Lstride), $diagv∂L)))
             # now, store the off diagonal
             for cc ∈ c:C-2
                 subdiagv∂L = Symbol(:v∂L_, cc+1, :_, c)
-                push!(q.args, :(vstore!(ptrv∂Ltri + $(size_T*W)*($Kmax*$c + $(cc-c - b2c)), $subdiagv∂L)))
+                push!(q.args, :(vstore!(ptrv∂Ltri + $(size_T*v∂Lstride)*($Kmax*$c + $(cc-c - b2c)), $subdiagv∂L)))
             end
         end
     end
@@ -480,7 +480,7 @@ function A_rdiv_L_kernel_quote(
         # load elements from v∂L
         for c ∈ 0:C-1
             subdiagv∂L = Symbol(:v∂L_, c, :_x)
-            push!(loopbody.args, Expr(:(=), subdiagv∂L, :(vload($V, ptrv∂Ltri + $(W*size_T)*($c - decrement)))))
+            push!(loopbody.args, Expr(:(=), subdiagv∂L, :(vload($V, ptrv∂Ltri + $(v∂Lstride*size_T)*($c - decrement)))))
         end
         # Now, we load vectors from B one at a time, and multiply
         for r ∈ 0:Riterl
@@ -504,7 +504,7 @@ function A_rdiv_L_kernel_quote(
         # now, store the sub-diagonal
         for c ∈ 0:C-1
             subdiagv∂L = Symbol(:v∂L_, c, :_x)
-            push!(loopbody.args, :(vstore!(ptrv∂Ltri + $(W*size_T)*($c - decrement),$subdiagv∂L)))
+            push!(loopbody.args, :(vstore!(ptrv∂Ltri + $(v∂Lstride*size_T)*($c - decrement),$subdiagv∂L)))
         end
 
         calc_prod_quote = quote
