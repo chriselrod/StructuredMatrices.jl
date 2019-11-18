@@ -4,6 +4,7 @@ using SIMDPirates, SLEEFPirates, VectorizationBase, LinearAlgebra, PaddedMatrice
 using PaddedMatrices: AbstractFixedSizeVector, AbstractFixedSizeMatrix
 using VectorizationBase: REGISTER_SIZE, REGISTER_COUNT
 using ReverseDiffExpressionsBase
+using Parameters
 
 import PaddedMatrices: param_type_length, type_length
 

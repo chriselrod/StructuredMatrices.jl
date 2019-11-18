@@ -17,7 +17,25 @@ using PaddedMatrices: AbstractMutableFixedSizeMatrix
 ### A[:,k] = ( B[:,k] - ∑ⱼ₌₁ᵏ⁻¹ A[:,j] * U[j,k] ) / U[k,k]
 ### eg a 2vec x 3 block from each will allow
 ### 
-
+Base.@kwdef mutable struct A_rdiv_U_config{T}
+    R::Union{Symbol,Int} = -1
+    C::Int = -1
+    K::Union{Symbol,Int} = -1
+    Astride::Union{Symbol,Int} = -1
+    Bstride::Union{Symbol,Int} = -1
+    Ustride::Int = -1
+    isL′::Bool = false
+    invdiagptr::Bool = false
+    Bsym::Symbol = :ptrB
+    Asym::Symbol = :ptrA
+    Utrisym::Symbol = :ptrUtri
+    Udiagsym::Symbol = :ptrUdiag
+    maskload::Bool = true
+    loadB::Bool = true
+    storeA::Bool = true
+    reduce_sym::Union{Symbol,Nothing} = nothing
+    maskexpr::Symbol = :__mask__
+end
 
 # Ustride
 # if ilL′
@@ -25,12 +43,9 @@ using PaddedMatrices: AbstractMutableFixedSizeMatrix
 # K is number of earlier iterations
 # divides B by U, stores in A
 function A_rdiv_U_kernel_quote(
-    R, C, K::Union{Symbol,Integer}, ::Type{T},
-    Astride, Bstride, Ustride, isL′, invdiagptr;
-    Bsym = :ptrB, Asym = :ptrA, Utrisym = :ptrUtri, Udiagsym = :ptrUdiag,
-    maskload = true, loadB = true, storeA = true, reduce_sym::Union{Symbol,Nothing} = nothing,
-    maskexpr = :__mask__
+    config::A_rdiv_U_config{T}
 ) where {T}
+    @unpack R, C, K, Astride, Bstride, Ustride, isL′, invdiagptr, Bsym, Asym, Utrisym, Udiagsym, maskload, loadB, storeA, reduce_sym, maskexpr = config
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
     if R isa Integer
@@ -243,15 +258,34 @@ function A_rdiv_U_kernel_quote(
     q
 end
 
+Base.@kwdef mutable struct A_rdiv_L_config{T}
+    R::Union{Symbol,Int} = -1
+    C::Int = -1
+    Kmax::Union{Symbol,Int} = -1
+    Astride::Union{Symbol,Int} = -1
+    Bstride::Union{Symbol,Int} = -1
+    isU′::Bool = false
+    invdiagptr::Bool = false
+    Bsym::Symbol = :ptrB
+    Asym::Symbol = :ptrA
+    Ltrisym::Symbol = :ptrLtri
+    Ldiagsym::Symbol = :ptrLdiag
+    maskload::Bool = true
+    loadB::Bool = true
+    storeA::Bool = true
+    calc_product::Int = 0
+    maskexpr::Symbol = :__mask__
+    increment_store::Bool = false
+    v∂Lstride::Int = VectorizationBase.pick_vector_width(T)
+end
+
+
 # ptr and Lstride is so that the first of the reverse iterations has offset 0
 # K is the amount of preceding columns.
 function A_rdiv_L_kernel_quote(
-    R, C, Kmax::Union{Symbol,Integer}, ::Type{T},
-    Astride, Bstride, isU′, invdiagptr;
-    Bsym = :ptrB, Asym = :ptrA, Ltrisym = :ptrLtri, Ldiagsym = :ptrLdiag,
-    maskload = true, loadB = true, storeA = true, calc_product::Int = 0,
-    maskexpr = :__mask__, increment_store::Bool = false, v∂Lstride::Int = VectorizationBase.pick_vector_width(T)#, store∂βsym::Symbol = :SENTINELNO, store∂Xsym::Symbol = :SENTINELNO
+    config::A_rdiv_L_config{T}
 ) where {T}
+    @unpack R, C, Kmax, Astride, Bstride, isU′, invdiagptr, Bsym, Asym, Ltrisym, Ldiagsym, maskload, loadB, storeA, calc_product, maskexpr, increment_store, v∂Lstride = config
     # K is either a symbol or integer, indicating number of preceding columns
     size_T = sizeof(T)
     if isU′
@@ -689,13 +723,20 @@ function div_ul_blocking_structure(rows = typemax(UInt), cols = typemax(UInt), :
 end
 
 function A_div_U_rowiter(
-    Mk, Nk, col_rem, T, CP, AP, n_col_reps
-)
+    Mk, Nk, col_rem, ::Type{T}, CP, AP, n_col_reps
+) where {T}
     size_T = sizeof(T)
+    config = A_rdiv_U_config{T}()
+    config.Mk = Mk
+    config.C = col_rem
+    config.K = 0
+    config.Astride = CP
+    config.Bstride = AP
+    config.Ustride = 0
+    config.isL′ = false
+    config.invdiagptr = true
     if col_rem > 0
-        row_iter = A_rdiv_U_kernel_quote(
-            Mk, col_rem, 0, T, CP, AP, 0, false, true
-        )
+        row_iter = A_rdiv_U_kernel_quote( config )
         push!(row_iter.args, :(ptrUtri += $(binomial2(col_rem)*size_T)))
         push!(row_iter.args, :(ptrUdiag += $(col_rem*size_T)))
         base_K = col_rem
@@ -704,9 +745,10 @@ function A_div_U_rowiter(
         base_K = 0
     end
     if n_col_reps > 1
-        iterquote = A_rdiv_U_kernel_quote(
-            Mk, Nk, :K, T, CP, AP, :K, false, true
-        )
+        config.C = Nk
+        config.K = :K
+        config.Ustride = :K
+        iterquote = A_rdiv_U_kernel_quote( config )
         row_iter_loop = quote
             K = $base_K
             for crep ∈ 0:$(n_col_reps-1)
@@ -718,9 +760,10 @@ function A_div_U_rowiter(
         end
         push!(row_iter.args, row_iter_loop)
     elseif n_col_reps == 1
-        row_iter_single = A_rdiv_U_kernel_quote(
-            Mk, Nk, 0, T, CP, AP, 0, false, true
-        )
+        config.C = Nk
+        config.K = 0
+        config.Ustride = 0
+        row_iter_single = A_rdiv_U_kernel_quote( config )
         push!(row_iter.args, row_iter_single)
     end
     row_iter
@@ -789,15 +832,21 @@ end
 
 
 function A_div_L′_rowiter(
-    Mk, Nk, col_rem, T, CP, AP, n_col_reps
-)
+    Mk, Nk, col_rem, ::Type{T}, CP, AP, n_col_reps
+) where {T}
     N = Nk * n_col_reps + col_rem
     size_T = sizeof(T)
+    config = A_rdiv_U_config{T}()
+    config.R = Mk
+    config.C = col_rem
+    config.K = 0
+    config.Astride = CP
+    config.Bstride = AP
+    config.Ustride = N
+    config.isL′ = true
+    config.invdiagptr = true
     if col_rem > 0
-        row_iter = A_rdiv_U_kernel_quote(
-            Mk, col_rem, 0, T, CP, AP, N, true, true
-        )
-        #pushfirst!(row_iter.args, :(ptrUtri = ptrUtribase))
+        row_iter = A_rdiv_U_kernel_quote( config )
         push!(row_iter.args, :(ptrUdiag += $(col_rem*size_T)))
         base_K = col_rem
         KmZ = false
@@ -807,9 +856,9 @@ function A_div_L′_rowiter(
         KmZ = true
     end
     if n_col_reps > 1
-        iterquote = A_rdiv_U_kernel_quote(
-            Mk, Nk, :K, T, CP, AP, N, true, true
-        )
+        config.C = Nk
+        config.K = :K
+        iterquote = A_rdiv_U_kernel_quote( config )
         row_iter_loop = quote
             K = $base_K
             for crep ∈ 0:$(n_col_reps-1)
@@ -821,9 +870,9 @@ function A_div_L′_rowiter(
         end
         push!(row_iter.args, row_iter_loop)
     elseif n_col_reps == 1
-        row_iter_single = A_rdiv_U_kernel_quote(
-            Mk, Nk, col_rem, T, CP, AP, N, true, true
-        )
+        config.C = Nk
+        config.K = col_rem
+        row_iter_single = A_rdiv_U_kernel_quote( config )
         push!(row_iter.args, row_iter_single)
     end
     row_iter
@@ -897,15 +946,20 @@ end
 
 
 function A_div_L_rowiter(
-    Mk, Nk, col_rem, T, CP, AP, n_col_reps
-)
+    Mk, Nk, col_rem, ::Type{T}, CP, AP, n_col_reps
+) where {T}
     N = Nk * n_col_reps + col_rem
     size_T = sizeof(T)
+    config = A_rdiv_L_config{T}()
+    config.R = Mk
+    config.C = col_rem
+    config.Kmax = col_rem
+    config.Astride = CP
+    config.Bstride = AP
+    config.isU′ = false
+    config.invdiagptr = true
     if col_rem > 0
-        
-        row_iter = A_rdiv_L_kernel_quote(
-            Mk, col_rem, col_rem, T, CP, AP, false, true
-        )
+        row_iter = A_rdiv_L_kernel_quote( config )
         #pushfirst!(row_iter.args, :(ptrUtri = ptrUtribase))
         fullcols = Nk * n_col_reps
         # handle following in A_rdiv_L_quote
@@ -921,9 +975,9 @@ function A_div_L_rowiter(
         KmZ = true
     end
     if n_col_reps > 1
-        iterquote = A_rdiv_L_kernel_quote(
-            Mk, Nk, :K, T, CP, AP, false, true
-        )
+        config.C = Nk
+        config.Kmax = :K
+        iterquote = A_rdiv_L_kernel_quote( config )
         row_iter_loop = quote
             K = $col_rem
             for crep ∈ 0:$(n_col_reps-1)
@@ -938,9 +992,9 @@ function A_div_L_rowiter(
         end
         push!(row_iter.args, row_iter_loop)
     elseif n_col_reps == 1
-        row_iter_single = A_rdiv_L_kernel_quote(
-            Mk, Nk, N, T, CP, AP, false, true
-        )
+        config.C = Nk
+        config.Kmax = N
+        row_iter_single = A_rdiv_L_kernel_quote( config )
         push!(row_iter.args, row_iter_single)
     end
     row_iter
