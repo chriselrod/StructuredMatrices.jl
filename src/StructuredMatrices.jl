@@ -33,5 +33,7 @@ include("ragged_matrix.jl")
 function __init__()
     @add_stackpointer_method rank_update rank_update! reverse_cholesky_grad ∂rank_update
 end
+include("precompile.jl")
+_precompile_()
 
 end # module
